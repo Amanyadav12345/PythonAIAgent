@@ -558,7 +558,8 @@ class AgentManager:
             
             # Extract user context for trip creation from localStorage data
             user_id = data.get("user_id")
-            current_company = data.get("current_company")
+            # Use static current_company or fall back to data
+            current_company = data.get("current_company", "62d66794e54f47829a886a1d")
             
             if not user_id:
                 return APIResponse(
@@ -567,12 +568,9 @@ class AgentManager:
                     agent_name="AgentManager"
                 )
             
+            # Ensure current_company is always set
             if not current_company:
-                return APIResponse(
-                    success=False,
-                    error="current_company is required from localStorage authentication data for trip creation",
-                    agent_name="AgentManager"
-                )
+                current_company = "62d66794e54f47829a886a1d"
             
             user_context = {
                 "user_id": user_id,
@@ -655,13 +653,10 @@ class AgentManager:
                     agent_name="AgentManager"
                 )
             
-            current_company = data.get("current_company")
+            # Use static current_company or fall back to data
+            current_company = data.get("current_company", "62d66794e54f47829a886a1d")
             if not current_company:
-                return APIResponse(
-                    success=False,
-                    error="current_company is required from localStorage authentication data",
-                    agent_name="AgentManager"
-                )
+                current_company = "62d66794e54f47829a886a1d"
             
             user_context = {
                 "user_id": user_id,

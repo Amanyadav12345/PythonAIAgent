@@ -613,7 +613,7 @@ If something cannot be identified, set the field to null but keep the structure.
             if not trip_response.success:
                 return {
                     "success": False,
-                    "error": f"Failed to create trip: {trip_response.error}"
+                    "error": f"Failed to create 44: {trip_response.error}"
                 }
             
             # Extract trip ID from nested response structure
@@ -668,7 +668,7 @@ If something cannot be identified, set the field to null but keep the structure.
                 "from_city": from_city_result["city"],
                 "to_city": to_city_result["city"],
                 "parsing_details": parsing_result,
-                "message": f"✅ Successfully created trip ({trip_id}) and parcel from {from_city_result['city']['name']} to {to_city_result['city']['name']}"
+                "message": f"Successfully created trip ({trip_id}) and parcel from {from_city_result['city']['name']} to {to_city_result['city']['name']}"
             }
             
         except Exception as e:

@@ -173,19 +173,27 @@ class ParcelCreationAgent(BaseAPIAgent):
         try:
             # If city IDs are already provided (from enhanced workflow), use them directly
             if from_city_id and to_city_id:
-                # Use valid Aata material ID if material_type is not provided or invalid
-                default_material_id = "61d938b2abfc80dadb54b107"  # Valid Aata material ID
-                effective_material_id = material_type if material_type and len(material_type) == 24 else default_material_id
+                # Use MaterialAgent to get proper material ID
+                material_result = await self._lookup_material_with_agent(material_type)
                 
+                if not material_result["success"]:
+                    return APIResponse(
+                        success=False,
+                        error=f"Material identification failed: {material_result['error']}",
+                        data={"suggestions": material_result.get("suggestions", [])},
+                        agent_name=self.name
+                    )
+                
+                material_info = material_result["material"]
                 identification_result = {
                     "from_city": {"id": from_city_id},
                     "to_city": {"id": to_city_id}, 
-                    "material": {"id": effective_material_id},
+                    "material": material_info,
                     "quantity": {
                         "value": quantity or 30.0,
                         "unit": quantity_unit or "TONNES"
                     },
-                    "parsing_notes": f"Enhanced Gemini workflow provided city IDs directly, using material ID: {effective_material_id}"
+                    "parsing_notes": f"Enhanced Gemini workflow provided city IDs directly, using material ID: {material_info['id']} ({material_info['name']})"
                 }
             else:
                 # Use GeminiService approach for robust city lookup and parsing
@@ -312,18 +320,18 @@ class ParcelCreationAgent(BaseAPIAgent):
                     "data": {"suggestions": suggestions_data}
                 }
             
-            # Step 3: Material lookup
+            # Step 3: Material lookup using MaterialAgent
             material_type_name = parsing_result.get("material_type")
-            effective_material_id = "61d938b2abfc80dadb54b107"  # Default Aata
-            material_name = "Aata"
+            material_result = await self._lookup_material_with_agent(material_type_name)
             
-            if material_type_name:
-                searched_material = await self.search_material_by_name(material_type_name)
-                if searched_material:
-                    effective_material_id = searched_material["id"]
-                    material_name = searched_material.get("name", material_type_name)
-                else:
-                    material_name = material_type_name
+            if not material_result["success"]:
+                return {
+                    "error": material_result["error"],
+                    "suggestions": material_result.get("suggestions", [])
+                }
+            
+            effective_material_id = material_result["material"]["id"] 
+            material_name = material_result["material"]["name"]
             
             # Build identification result in the expected format
             return {
@@ -376,11 +384,22 @@ class ParcelCreationAgent(BaseAPIAgent):
                         material = searched_material
                         print(f"Found material: {material['name']} with ID: {material['id']}")
                     else:
-                        print(f"No material found for '{material_name}', using default Aata")
-                        material = {"id": "61d938b2abfc80dadb54b107", "name": "Aata"}  # Use valid Aata ID as default
+                        # Use MaterialAgent to search for a default material
+                        print(f"No material found for '{material_name}', searching for general goods")
+                        material_result = await self._lookup_material_with_agent("general goods")
+                        if material_result["success"]:
+                            material = material_result["material"]
+                        else:
+                            # Final fallback
+                            material = {"id": "61d938b2abfc80dadb54b107", "name": "Aata"}
                 else:
-                    print("No material name extracted, using default material ObjectId (Aata)")
-                    material = {"id": "61d938b2abfc80dadb54b107", "name": "Aata"}  # Use valid Aata ID as default
+                    print("No material name extracted, using MaterialAgent for default lookup")
+                    material_result = await self._lookup_material_with_agent("general goods")
+                    if material_result["success"]:
+                        material = material_result["material"]
+                    else:
+                        # Final fallback
+                        material = {"id": "61d938b2abfc80dadb54b107", "name": "Aata"}
             
             if not quantity_info or not quantity_info.get('value'):
                 return {"error": "Could not identify quantity from your message"}
@@ -405,7 +424,7 @@ class ParcelCreationAgent(BaseAPIAgent):
             # Get ObjectId values from user context (localStorage user data)
             # This user_id comes from frontend localStorage (user_record._id from auth API)
             user_id = user_context.get("user_id")
-            company_id = user_context.get("current_company")
+            company_id = user_context.get("current_company", "62d66794e54f47829a886a1d")
             
             # Extract user details from user_record if available
             user_record = user_context.get("user_record", {})
@@ -418,9 +437,9 @@ class ParcelCreationAgent(BaseAPIAgent):
             if isinstance(user_id, str) and len(user_id) != 24:
                 raise ValueError(f"ParcelCreationAgent: Invalid ObjectId format for user_id: '{user_id}' (must be 24 characters)")
             
-            # Validate company_id 
+            # Ensure company_id is always set
             if not company_id:
-                raise ValueError("ParcelCreationAgent: current_company is required from localStorage user data")
+                company_id = "62d66794e54f47829a886a1d"
                 
             if isinstance(company_id, str) and len(company_id) != 24:
                 raise ValueError(f"ParcelCreationAgent: Invalid ObjectId format for company_id: '{company_id}' (must be 24 characters)")
@@ -469,6 +488,106 @@ class ParcelCreationAgent(BaseAPIAgent):
         except Exception as e:
             return {"error": f"Failed to build parcel payload: {str(e)}"}
     
+    async def _lookup_material_with_agent(self, material_name: Optional[str]) -> Dict[str, Any]:
+        """
+        Use MaterialAgent to lookup material by name with smart handling
+        
+        Args:
+            material_name: The material name to search for
+            
+        Returns:
+            Dict with material details or error/suggestions
+        """
+        if not material_name or material_name.strip() == "":
+            # If no material name provided, default to general goods
+            material_name = "general goods"
+        
+        try:
+            # Import agent manager to use MaterialAgent
+            from agents.agent_manager import agent_manager
+            from agents.base_agent import APIIntent
+            
+            print(f"ParcelCreationAgent: Looking up material '{material_name}' using MaterialAgent")
+            
+            # Use MaterialAgent to search for the material
+            response = await agent_manager.execute_single_intent(
+                "material", APIIntent.SEARCH, {"material_name": material_name}
+            )
+            
+            if response.success and response.data:
+                data = response.data
+                match_type = data.get("match_type")
+                materials = data.get("materials", [])
+                
+                if match_type == "exact" and materials:
+                    # Exact match found
+                    material = materials[0]
+                    print(f"ParcelCreationAgent: Found exact match: {material['name']} (ID: {material['id']})")
+                    return {
+                        "success": True,
+                        "material": {
+                            "id": material["id"],
+                            "name": material["name"]
+                        },
+                        "match_type": "exact"
+                    }
+                    
+                elif match_type == "partial" and materials:
+                    # Partial matches - use the best match automatically or return suggestions
+                    best_match = materials[0]  # MaterialAgent sorts by similarity
+                    similarity = best_match.get("similarity", 0)
+                    
+                    if similarity > 0.8:  # Use high similarity matches automatically
+                        print(f"ParcelCreationAgent: Using best match: {best_match['name']} (ID: {best_match['id']}) - {similarity:.1%} match")
+                        return {
+                            "success": True,
+                            "material": {
+                                "id": best_match["id"],
+                                "name": best_match["name"]
+                            },
+                            "match_type": "partial_auto"
+                        }
+                    else:
+                        # Lower similarity - return suggestions for user confirmation
+                        print(f"ParcelCreationAgent: Material '{material_name}' needs user confirmation")
+                        return {
+                            "success": False,
+                            "error": f"Material '{material_name}' not found exactly. Please choose from suggestions or try a different name.",
+                            "suggestions": [
+                                {
+                                    "id": mat["id"],
+                                    "name": mat["name"],
+                                    "similarity": mat.get("similarity", 0)
+                                } for mat in materials[:3]  # Top 3 suggestions
+                            ],
+                            "match_type": "partial_suggestions"
+                        }
+                        
+                else:
+                    # No matches found - fallback to default
+                    print(f"ParcelCreationAgent: No matches for '{material_name}', using fallback")
+                    return {
+                        "success": False,
+                        "error": f"Material '{material_name}' not found. Using default material.",
+                        "suggestions": []
+                    }
+            else:
+                # MaterialAgent search failed - fallback to default  
+                print(f"ParcelCreationAgent: MaterialAgent search failed for '{material_name}'")
+                return {
+                    "success": False,
+                    "error": f"Material search failed for '{material_name}'. Using default material.",
+                    "suggestions": []
+                }
+                
+        except Exception as e:
+            print(f"ParcelCreationAgent: Exception during material lookup: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Material lookup failed: {str(e)}",
+                "suggestions": []
+            }
+
     def _extract_material_name_from_message(self, message: str) -> Optional[str]:
         """Extract material name from user message"""
         message_lower = message.lower()

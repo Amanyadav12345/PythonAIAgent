@@ -188,7 +188,7 @@ class AgentService:
                 )
             else:
                 return ChatResponse(
-                    response=f"Failed to create trip: {response.error}",
+                    response=f"Failed to create trip 1: {response.error}",
                     sources=[],
                     tools_used=["TripCreationAgent"]
                 )
@@ -303,7 +303,7 @@ class AgentService:
                     )
                 else:
                     return ChatResponse(
-                        response=f"Failed to create trip and parcel: {response.error}",
+                        response=f"Failed to create trip 11 and parcel: {response.error}",
                         sources=[],
                         tools_used=["TripCreationAgent", "ParcelCreationAgent"]
                     )

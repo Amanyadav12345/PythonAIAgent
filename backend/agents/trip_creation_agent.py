@@ -81,15 +81,17 @@ class TripCreationAgent(BaseAPIAgent):
     async def handle_trip_creation_request(self, user_message: str, user_context: Dict[str, Any]) -> APIResponse:
         """Handle natural language trip creation requests with async data fetching"""
         
-        # Get ObjectIds from user_context (from frontend localStorage) - NO DEFAULTS
+        # Get ObjectIds from user_context (from frontend localStorage)
         user_id = user_context.get("user_id")
-        company_id = user_context.get("current_company")
+        company_id = user_context.get("current_company", "62d66794e54f47829a886a1d")
         
         # Validate required localStorage data
         if not user_id:
             raise ValueError("TripCreationAgent: user_id is required from localStorage user data")
+        
+        # Ensure company_id is always set
         if not company_id:
-            raise ValueError("TripCreationAgent: current_company is required from localStorage user data")
+            company_id = "62d66794e54f47829a886a1d"
             
         handled_by = user_id  # handled_by is same as created_by
         
@@ -174,7 +176,7 @@ class TripCreationAgent(BaseAPIAgent):
                         "trip_id": trip_id,
                         "trip_details": trip_data,
                         "vehicle_requirements": vehicle_requirements,
-                        "message": f"✅ Trip created successfully! Trip ID: {trip_id}",
+                        "message": f"Trip created successfully! Trip ID: {trip_id}",
                         "next_step": "Cities and materials data are being loaded. You can now create parcels for this trip.",
                         "data_loading": "Cities and materials data loading in background..."
                     },
@@ -184,7 +186,7 @@ class TripCreationAgent(BaseAPIAgent):
             else:
                 return APIResponse(
                     success=False,
-                    error=f"Failed to create trip: {response.error}",
+                    error=f"Failed to create trip22: {response.error}",
                     intent=APIIntent.CREATE,
                     agent_name=self.name
                 )
