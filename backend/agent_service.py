@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from pydantic import BaseModel
+from typing import Optional, Dict, Any
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
@@ -12,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tools import search_tool, wiki_tool, save_tool
 from truck_tools import calculate_rolling_radius, calculate_truck_load_distribution, estimate_fuel_consumption
 from agents.agent_manager import agent_manager, WorkflowIntent
+from langchain_agent_tools import get_all_langchain_tools, TOOL_USAGE_GUIDE
 
 load_dotenv()
 
@@ -24,6 +26,7 @@ class ChatResponse(BaseModel):
     response: str
     sources: list[str] = []
     tools_used: list[str] = []
+    data: Optional[Dict[str, Any]] = None
 
 class ResearchResponse(BaseModel):
     topic: str
@@ -46,29 +49,41 @@ class AgentService:
         self.parser = PydanticOutputParser(pydantic_object=ResearchResponse)
         
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """
-            You are a specialized logistics and transportation assistant focused on truck operations, rolling radius calculations, and parcel management.
+            ("system", f"""
+            You are a specialized logistics and transportation assistant with access to a complete logistics management system.
             
-            You help with:
-            - Creating and managing parcels for truck transportation
-            - Route optimization and trip planning
+            You can help users with:
+            - Creating trips between cities (Mumbai, Delhi, Chennai, etc.)
+            - Creating parcels for material transportation (steel, cement, rice, etc.)
+            - Finding materials and cities in the system
+            - Managing complete shipments from pickup to delivery
+            - Selecting consignors and logistics partners
             - Rolling radius calculations for different tire sizes
-            - Material transport specifications and requirements
             - Truck load optimization and vehicle selection
             - Logistics cost calculations and delivery estimates
             
-            Use the available tools when necessary to provide accurate transportation and logistics information.
-            Always format responses clearly and focus on practical trucking and logistics solutions.
+            IMPORTANT: For logistics operations, always use the specialized tools available:
+            
+            {TOOL_USAGE_GUIDE}
+            
+            When users want to ship materials, create trips, or manage parcels, use the logistics tools instead of general search.
+            Always be helpful and provide step-by-step assistance for complex logistics operations.
             """),
             ("placeholder", "{chat_history}"),
             ("human", "{query}"),
             ("placeholder", "{agent_scratchpad}"),
         ])
         
-        self.tools = [
+        # Combine original tools with new LangChain agent tools
+        original_tools = [
             search_tool, wiki_tool, save_tool,
             calculate_rolling_radius, calculate_truck_load_distribution, estimate_fuel_consumption
         ]
+        
+        # Add logistics agent tools
+        langchain_agent_tools = get_all_langchain_tools()
+        
+        self.tools = original_tools + langchain_agent_tools
         
         if self.has_llm:
             self.agent = create_tool_calling_agent(
@@ -257,7 +272,8 @@ class AgentService:
                 return ChatResponse(
                     response=response.get("message", "Trip and parcel created successfully!"),
                     sources=[],
-                    tools_used=["GeminiService", "TripCreationAgent", "ParcelCreationAgent", "CityLookupAPI"]
+                    tools_used=["GeminiService", "TripCreationAgent", "ParcelCreationAgent", "CityLookupAPI"],
+                    data=response  # Pass through all response data including consignor selection
                 )
             else:
                 error_message = response.get("error", "Unknown error occurred")

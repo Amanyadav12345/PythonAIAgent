@@ -17,6 +17,7 @@ from .parcel_agent import ParcelAgent
 from .auth_agent import AuthAgent
 from .trip_creation_agent import TripCreationAgent
 from .parcel_creation_agent import ParcelCreationAgent
+from .consignor_selection_agent import ConsignorSelectionAgent
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ class AgentManager:
         # Initialize new specialized agents for trip and parcel creation
         self.agents["trip_creator"] = TripCreationAgent()
         self.agents["parcel_creator"] = ParcelCreationAgent()
+        self.agents["consignor_selector"] = ConsignorSelectionAgent()
         
         # Initialize cache for cities and materials data
         self._cached_cities = []
@@ -705,15 +707,44 @@ class AgentManager:
             
             if response.success:
                 logger.info(f"AgentManager: Parcel created successfully with ID: {response.data.get('parcel_id')}")
-                return APIResponse(
-                    success=True,
-                    data={
-                        "workflow": "CREATE_PARCEL_FOR_TRIP",
-                        "parcel_result": response.data,
-                        "message": response.data.get("message")
-                    },
-                    agent_name="AgentManager"
-                )
+                
+                # Trigger consignor selection after successful parcel creation
+                parcel_id = response.data.get('parcel_id')
+                consignor_response = await self._trigger_consignor_selection(data, trip_id, parcel_id)
+                
+                if consignor_response.success:
+                    logger.info("AgentManager: Consignor selection initiated")
+                    
+                    # Get the formatted message with partner options
+                    formatted_partners = consignor_response.data.get("formatted_message", "")
+                    
+                    # Create comprehensive message with parcel success + consignor selection
+                    full_message = f"{response.data.get('message')}\n\n**NEXT STEP: Select a Consignor**\n\n{formatted_partners}"
+                    
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "workflow": "CREATE_PARCEL_FOR_TRIP",
+                            "parcel_result": response.data,
+                            "consignor_selection": consignor_response.data,
+                            "message": full_message,
+                            "requires_user_input": True,
+                            "input_type": "consignor_selection"
+                        },
+                        agent_name="AgentManager"
+                    )
+                else:
+                    logger.warning(f"AgentManager: Consignor selection failed: {consignor_response.error}")
+                    # Still return success for parcel creation even if consignor selection fails
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "workflow": "CREATE_PARCEL_FOR_TRIP",
+                            "parcel_result": response.data,
+                            "message": f"{response.data.get('message')} (Consignor selection unavailable)"
+                        },
+                        agent_name="AgentManager"
+                    )
             else:
                 logger.error(f"AgentManager: Parcel creation failed: {response.error}")
                 return APIResponse(
@@ -778,14 +809,27 @@ class AgentManager:
                 workflow_results["steps"].append("✓ Parcel created successfully")
                 workflow_results["parcel_result"] = parcel_response.data.get("parcel_result")
                 
+                # Step 3: Trigger consignor selection after successful parcel creation
+                parcel_id = workflow_results["parcel_result"].get("parcel_id")
+                consignor_response = await self._trigger_consignor_selection(data, trip_id, parcel_id)
+                
+                if consignor_response.success:
+                    workflow_results["steps"].append("✓ Consignor selection initiated")
+                    workflow_results["consignor_selection"] = consignor_response.data
+                else:
+                    workflow_results["steps"].append(f"⚠ Consignor selection failed: {consignor_response.error}")
+                
                 return APIResponse(
                     success=True,
                     data={
                         "workflow": "CREATE_TRIP_AND_PARCEL",
                         "trip_id": trip_id,
-                        "parcel_id": workflow_results["parcel_result"].get("parcel_id"),
+                        "parcel_id": parcel_id,
                         "workflow_details": workflow_results,
-                        "message": f"🚛 Trip and parcel created successfully! Trip: {trip_id}, Parcel: {workflow_results['parcel_result'].get('parcel_id')}"
+                        "consignor_selection": workflow_results.get("consignor_selection"),
+                        "message": f"Successfully created trip ({trip_id}) and parcel ({parcel_id}).\n\n**NEXT STEP: Select a Consignor**\n\nPlease choose from the available preferred partners below:",
+                        "requires_user_input": True,
+                        "input_type": "consignor_selection"
                     },
                     agent_name="AgentManager"
                 )
@@ -806,6 +850,204 @@ class AgentManager:
                 error=str(e),
                 agent_name="AgentManager",
                 data=workflow_results
+            )
+    
+    async def _trigger_consignor_selection(self, data: Dict[str, Any], trip_id: str, parcel_id: str) -> APIResponse:
+        """
+        Trigger consignor selection after successful parcel creation
+        """
+        logger.info("AgentManager: Triggering consignor selection workflow")
+        
+        if "consignor_selector" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="Consignor selection agent not available",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            consignor_agent = self.agents["consignor_selector"]
+            
+            # Get company ID from user context - try multiple fields
+            company_id = (
+                data.get("current_company") or 
+                data.get("company_id") or 
+                data.get("created_by_company") or
+                "62d66794e54f47829a886a1d"
+            )
+            
+            print(f"AgentManager: Triggering consignor selection for company: {company_id}")
+            print(f"AgentManager: Available user context keys: {list(data.keys())}")
+            
+            # Get preferred partners (first page, 5 items)
+            consignor_data = {
+                "company_id": company_id,
+                "page": 0,
+                "page_size": 5,
+                "trip_id": trip_id,
+                "parcel_id": parcel_id
+            }
+            
+            response = await consignor_agent.execute(APIIntent.SEARCH, consignor_data)
+            
+            if response.success and response.data:
+                partners = response.data.get("partners", [])
+                
+                if partners:
+                    # Format partners for display
+                    formatted_message = consignor_agent.format_partners_for_chat(
+                        partners, 
+                        response.data.get("page", 0)
+                    )
+                    
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "partners": partners,
+                            "formatted_message": formatted_message,
+                            "has_more": response.data.get("has_more", False),
+                            "page": response.data.get("page", 0),
+                            "total_available": response.data.get("total_available", 0),
+                            "trip_id": trip_id,
+                            "parcel_id": parcel_id
+                        },
+                        agent_name="AgentManager"
+                    )
+                else:
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "partners": [],
+                            "formatted_message": "No preferred partners found for your company. You can continue without selecting a consignor.",
+                            "has_more": False,
+                            "page": 0,
+                            "total_available": 0,
+                            "trip_id": trip_id,
+                            "parcel_id": parcel_id
+                        },
+                        agent_name="AgentManager"
+                    )
+            else:
+                return APIResponse(
+                    success=False,
+                    error=f"Failed to fetch preferred partners: {response.error}",
+                    agent_name="AgentManager"
+                )
+                
+        except Exception as e:
+            logger.error(f"AgentManager: Error triggering consignor selection: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+
+    async def handle_consignor_selection(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Handle user's consignor selection from preferred partners
+        """
+        logger.info("AgentManager: Handling consignor selection")
+        
+        if "consignor_selector" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="Consignor selection agent not available",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            consignor_agent = self.agents["consignor_selector"]
+            
+            # Check if user wants to see more partners
+            user_input = data.get("selection", "").lower().strip()
+            
+            if user_input == "more":
+                # Get next page of partners
+                page = data.get("current_page", 0) + 1
+                company_id = data.get("company_id", "62d66794e54f47829a886a1d")
+                
+                consignor_data = {
+                    "company_id": company_id,
+                    "page": page,
+                    "page_size": 5
+                }
+                
+                response = await consignor_agent.execute(APIIntent.SEARCH, consignor_data)
+                
+                if response.success and response.data:
+                    partners = response.data.get("partners", [])
+                    formatted_message = consignor_agent.format_partners_for_chat(partners, page)
+                    
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "action": "show_more_partners",
+                            "partners": partners,
+                            "formatted_message": formatted_message,
+                            "has_more": response.data.get("has_more", False),
+                            "page": page
+                        },
+                        agent_name="AgentManager"
+                    )
+                    
+            elif user_input == "skip":
+                # User chose to skip consignor selection
+                return APIResponse(
+                    success=True,
+                    data={
+                        "action": "skip_consignor",
+                        "message": "Consignor selection skipped. Your trip and parcel are ready!"
+                    },
+                    agent_name="AgentManager"
+                )
+                
+            elif user_input.isdigit():
+                # User selected a partner by number
+                selection_number = int(user_input)
+                partner_id = data.get("partner_id")
+                partner_name = data.get("partner_name", f"Partner {selection_number}")
+                
+                if partner_id:
+                    response = await consignor_agent.execute(APIIntent.UPDATE, {
+                        "partner_id": partner_id,
+                        "partner_name": partner_name
+                    })
+                    
+                    if response.success:
+                        return APIResponse(
+                            success=True,
+                            data={
+                                "action": "consignor_selected",
+                                "selected_partner": response.data,
+                                "message": response.data.get("message", f"Selected {partner_name} as consignor")
+                            },
+                            agent_name="AgentManager"
+                        )
+                    else:
+                        return APIResponse(
+                            success=False,
+                            error=f"Failed to select consignor: {response.error}",
+                            agent_name="AgentManager"
+                        )
+                else:
+                    return APIResponse(
+                        success=False,
+                        error="Invalid selection. Please provide a valid partner number.",
+                        agent_name="AgentManager"
+                    )
+            else:
+                return APIResponse(
+                    success=False,
+                    error="Invalid input. Please enter a number (1-5), 'more' for more options, or 'skip' to continue.",
+                    agent_name="AgentManager"
+                )
+                
+        except Exception as e:
+            logger.error(f"AgentManager: Error handling consignor selection: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
             )
 
 # Global agent manager instance

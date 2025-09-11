@@ -660,16 +660,24 @@ If something cannot be identified, set the field to null but keep the structure.
                     "error": f"Trip created successfully (ID: {trip_id}) but parcel creation failed: {parcel_response.error}"
                 }
             
-            # Step 5: Return success response
-            return {
+            # Step 5: Return success response with consignor selection data
+            response_data = {
                 "success": True,
                 "trip_id": trip_id,
                 "parcel_id": parcel_response.data.get("parcel_id"),
                 "from_city": from_city_result["city"],
                 "to_city": to_city_result["city"],
                 "parsing_details": parsing_result,
-                "message": f"Successfully created trip ({trip_id}) and parcel from {from_city_result['city']['name']} to {to_city_result['city']['name']}"
+                "message": parcel_response.data.get("message", f"Successfully created trip ({trip_id}) and parcel from {from_city_result['city']['name']} to {to_city_result['city']['name']}")
             }
+            
+            # Include consignor selection data if present
+            if parcel_response.data.get("requires_user_input"):
+                response_data["requires_user_input"] = parcel_response.data.get("requires_user_input")
+                response_data["input_type"] = parcel_response.data.get("input_type")
+                response_data["consignor_selection"] = parcel_response.data.get("consignor_selection")
+            
+            return response_data
             
         except Exception as e:
             logger.error(f"Enhanced trip and parcel creation failed: {str(e)}")
