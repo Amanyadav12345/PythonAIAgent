@@ -49,8 +49,8 @@ const Login: React.FC = () => {
   return (
     <div className="login-container">
       <div className="login-card">
-        <h1 className="login-title">AI Agent Chat</h1>
-        <p className="login-subtitle">Sign in to continue</p>
+        <h1 className="login-title">🚛 Truck & Rolling Radius Hub</h1>
+        <p className="login-subtitle">Sign in to manage your logistics operations</p>
         
         <form onSubmit={handleSubmit} className="login-form">
           <div className="form-group">

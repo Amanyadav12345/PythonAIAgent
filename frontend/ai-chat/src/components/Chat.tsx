@@ -77,7 +77,7 @@ const Chat: React.FC = () => {
     <div className="chat-container">
       <header className="chat-header">
         <div className="header-left">
-          <h1>AI Agent Chat</h1>
+          <h1>🚛 Truck & Rolling Radius Assistant</h1>
           <span className="user-info">Welcome, {user?.full_name || user?.username}</span>
         </div>
         <div className="header-actions">
@@ -93,13 +93,15 @@ const Chat: React.FC = () => {
       <div className="messages-container">
         {messages.length === 0 && (
           <div className="welcome-message">
-            <h2>👋 Hello! I'm your AI Assistant</h2>
-            <p>I can help you with research, answer questions, and search for information.</p>
+            <h2>🚛 Welcome to Truck & Rolling Radius Management!</h2>
+            <p>I can help you manage parcels, trips, vehicle routing, and rolling radius calculations for truck operations.</p>
             <p>Try asking me something like:</p>
             <ul>
-              <li>"What's the latest news about artificial intelligence?"</li>
-              <li>"Tell me about machine learning"</li>
-              <li>"Research renewable energy trends"</li>
+              <li>"Create a parcel from Jaipur to Kolkata with 25 tonnes of steel"</li>
+              <li>"Find available trucks for Delhi to Mumbai route"</li>
+              <li>"Calculate rolling radius for tire size 295/80R22.5"</li>
+              <li>"Search for materials suitable for heavy transport"</li>
+              <li>"Check trip status and route optimization"</li>
             </ul>
           </div>
         )}
@@ -158,7 +160,7 @@ const Chat: React.FC = () => {
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Type your message here..."
+            placeholder="Ask about trucks, parcels, routes, or rolling radius calculations..."
             disabled={isLoading}
             className="message-input"
           />

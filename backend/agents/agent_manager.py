@@ -15,6 +15,8 @@ from .material_agent import MaterialAgent
 from .trip_agent import TripAgent
 from .parcel_agent import ParcelAgent
 from .auth_agent import AuthAgent
+from .trip_creation_agent import TripCreationAgent
+from .parcel_creation_agent import ParcelCreationAgent
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -28,6 +30,9 @@ class WorkflowIntent(Enum):
     FIND_TRIPS = "find_trips"
     GET_PARCEL_STATUS = "get_parcel_status"
     CREATE_TRIP = "create_trip"
+    CREATE_TRIP_ADVANCED = "create_trip_advanced"
+    CREATE_PARCEL_FOR_TRIP = "create_parcel_for_trip"
+    CREATE_TRIP_AND_PARCEL = "create_trip_and_parcel"
     RESOLVE_DEPENDENCIES = "resolve_dependencies"
 
 class AgentManager:
@@ -91,6 +96,14 @@ class AgentManager:
                 created_by=os.getenv("CREATED_BY_ID"),
                 created_by_company=os.getenv("CREATED_BY_COMPANY_ID")
             )
+        
+        # Initialize new specialized agents for trip and parcel creation
+        self.agents["trip_creator"] = TripCreationAgent()
+        self.agents["parcel_creator"] = ParcelCreationAgent()
+        
+        # Initialize cache for cities and materials data
+        self._cached_cities = []
+        self._cached_materials = []
         
         logger.info(f"AgentManager: Initialized {len(self.agents)} agents: {list(self.agents.keys())}")
     
@@ -203,6 +216,12 @@ class AgentManager:
             return await self._workflow_get_parcel_status(data)
         elif workflow == WorkflowIntent.CREATE_TRIP:
             return await self._workflow_create_trip(data)
+        elif workflow == WorkflowIntent.CREATE_TRIP_ADVANCED:
+            return await self._workflow_create_trip_advanced(data)
+        elif workflow == WorkflowIntent.CREATE_PARCEL_FOR_TRIP:
+            return await self._workflow_create_parcel_for_trip(data)
+        elif workflow == WorkflowIntent.CREATE_TRIP_AND_PARCEL:
+            return await self._workflow_create_trip_and_parcel(data)
         elif workflow == WorkflowIntent.RESOLVE_DEPENDENCIES:
             return await self._workflow_resolve_dependencies(data)
         else:
@@ -519,6 +538,280 @@ class AgentManager:
             return True, user_info, None
         else:
             return False, None, response.error
+    
+    async def _workflow_create_trip_advanced(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Advanced trip creation workflow using the new TripCreationAgent
+        This uses the external API at https://35.244.19.78:8042/trips
+        """
+        logger.info("AgentManager: Starting CREATE_TRIP_ADVANCED workflow")
+        
+        if "trip_creator" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="Trip creation agent not available",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            trip_creator = self.agents["trip_creator"]
+            
+            # Extract user context for trip creation from localStorage data
+            user_id = data.get("user_id")
+            current_company = data.get("current_company")
+            
+            if not user_id:
+                return APIResponse(
+                    success=False,
+                    error="user_id is required from localStorage authentication data for trip creation",
+                    agent_name="AgentManager"
+                )
+            
+            if not current_company:
+                return APIResponse(
+                    success=False,
+                    error="current_company is required from localStorage authentication data for trip creation",
+                    agent_name="AgentManager"
+                )
+            
+            user_context = {
+                "user_id": user_id,
+                "current_company": current_company,
+                "name": data.get("name", "User"),
+                "email": data.get("email", ""),
+                "username": data.get("username", ""),
+                "user_record": data.get("user_record"),
+                # Legacy field mappings
+                "company_id": current_company,
+                "handled_by": user_id  # handled_by is same as created_by (user_id)
+            }
+            
+            print(f"AgentManager: user_context for trip creation: {user_context}")
+            
+            # Use natural language processing to create trip
+            response = await trip_creator.handle_trip_creation_request(
+                user_message=data.get("message", "Create a new trip"),
+                user_context=user_context
+            )
+            
+            if response.success:
+                logger.info(f"AgentManager: Trip created successfully with ID: {response.data.get('trip_id')}")
+                return APIResponse(
+                    success=True,
+                    data={
+                        "workflow": "CREATE_TRIP_ADVANCED",
+                        "trip_result": response.data,
+                        "message": response.data.get("message")
+                    },
+                    agent_name="AgentManager"
+                )
+            else:
+                logger.error(f"AgentManager: Trip creation failed: {response.error}")
+                return APIResponse(
+                    success=False,
+                    error=f"Trip creation failed: {response.error}",
+                    agent_name="AgentManager"
+                )
+                
+        except Exception as e:
+            logger.error(f"AgentManager: CREATE_TRIP_ADVANCED workflow error: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+    
+    async def _workflow_create_parcel_for_trip(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Create parcel for existing trip workflow using ParcelCreationAgent
+        """
+        logger.info("AgentManager: Starting CREATE_PARCEL_FOR_TRIP workflow")
+        
+        if "parcel_creator" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="Parcel creation agent not available",
+                agent_name="AgentManager"
+            )
+        
+        trip_id = data.get("trip_id")
+        if not trip_id:
+            return APIResponse(
+                success=False,
+                error="trip_id is required for parcel creation",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            parcel_creator = self.agents["parcel_creator"]
+            
+            # Pass through all user context data from the workflow
+            # Ensure we have the required user_id from localStorage
+            user_id = data.get("user_id")
+            if not user_id:
+                return APIResponse(
+                    success=False,
+                    error="user_id is required from localStorage authentication data",
+                    agent_name="AgentManager"
+                )
+            
+            current_company = data.get("current_company")
+            if not current_company:
+                return APIResponse(
+                    success=False,
+                    error="current_company is required from localStorage authentication data",
+                    agent_name="AgentManager"
+                )
+            
+            user_context = {
+                "user_id": user_id,
+                "username": data.get("username", ""),
+                "name": data.get("name", "User"),
+                "email": data.get("email", ""),
+                "current_company": current_company,
+                "user_record": data.get("user_record"),
+                # Legacy fallbacks for older code
+                "company_id": current_company,
+                "user_name": data.get("name", "User")
+            }
+            
+            print(f"AgentManager: user_context for parcel creation: {user_context}")
+            
+            # Get cached cities and materials data, or fetch if not available
+            cities_data = getattr(self, '_cached_cities', [])
+            materials_data = getattr(self, '_cached_materials', [])
+            
+            # If no cached data, try to fetch it synchronously
+            if not cities_data and "city" in self.agents:
+                cities_response = await self.execute_single_intent("city", APIIntent.LIST, {})
+                if cities_response.success and cities_response.data:
+                    cities_data = cities_response.data.get('cities', [])
+                    self._cached_cities = cities_data
+            
+            if not materials_data and "material" in self.agents:
+                materials_response = await self.execute_single_intent("material", APIIntent.LIST, {})
+                if materials_response.success and materials_response.data:
+                    materials_data = materials_response.data.get('materials', [])
+                    self._cached_materials = materials_data
+            
+            response = await parcel_creator.handle_parcel_creation_request(
+                user_message=data.get("message", "Create a parcel"),
+                user_context=user_context,
+                trip_id=trip_id,
+                cities_data=cities_data,
+                materials_data=materials_data,
+                from_city_id=data.get("from_city_id"),
+                to_city_id=data.get("to_city_id"),
+                material_type=data.get("material_type"),
+                quantity=data.get("quantity"),
+                quantity_unit=data.get("quantity_unit"),
+                cost=data.get("cost")
+            )
+            
+            if response.success:
+                logger.info(f"AgentManager: Parcel created successfully with ID: {response.data.get('parcel_id')}")
+                return APIResponse(
+                    success=True,
+                    data={
+                        "workflow": "CREATE_PARCEL_FOR_TRIP",
+                        "parcel_result": response.data,
+                        "message": response.data.get("message")
+                    },
+                    agent_name="AgentManager"
+                )
+            else:
+                logger.error(f"AgentManager: Parcel creation failed: {response.error}")
+                return APIResponse(
+                    success=False,
+                    error=f"Parcel creation failed: {response.error}",
+                    agent_name="AgentManager"
+                )
+                
+        except Exception as e:
+            logger.error(f"AgentManager: CREATE_PARCEL_FOR_TRIP workflow error: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+    
+    async def _workflow_create_trip_and_parcel(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Complete workflow: Create trip first, then create parcel for that trip
+        """
+        logger.info("AgentManager: Starting CREATE_TRIP_AND_PARCEL workflow")
+        
+        workflow_results = {
+            "steps": [],
+            "trip_result": None,
+            "parcel_result": None
+        }
+        
+        try:
+            # Step 1: Create trip
+            trip_response = await self._workflow_create_trip_advanced(data)
+            
+            if not trip_response.success:
+                workflow_results["steps"].append(f"✗ Trip creation failed: {trip_response.error}")
+                return APIResponse(
+                    success=False,
+                    error=f"Trip creation failed: {trip_response.error}",
+                    agent_name="AgentManager",
+                    data=workflow_results
+                )
+            
+            trip_id = trip_response.data.get("trip_result", {}).get("trip_id")
+            if not trip_id:
+                workflow_results["steps"].append("✗ Trip created but no trip ID returned")
+                return APIResponse(
+                    success=False,
+                    error="Trip created but no trip ID returned",
+                    agent_name="AgentManager",
+                    data=workflow_results
+                )
+            
+            workflow_results["steps"].append(f"✓ Trip created successfully: {trip_id}")
+            workflow_results["trip_result"] = trip_response.data.get("trip_result")
+            
+            # Step 2: Create parcel for the trip
+            parcel_data = data.copy()
+            parcel_data["trip_id"] = trip_id
+            
+            parcel_response = await self._workflow_create_parcel_for_trip(parcel_data)
+            
+            if parcel_response.success:
+                workflow_results["steps"].append("✓ Parcel created successfully")
+                workflow_results["parcel_result"] = parcel_response.data.get("parcel_result")
+                
+                return APIResponse(
+                    success=True,
+                    data={
+                        "workflow": "CREATE_TRIP_AND_PARCEL",
+                        "trip_id": trip_id,
+                        "parcel_id": workflow_results["parcel_result"].get("parcel_id"),
+                        "workflow_details": workflow_results,
+                        "message": f"🚛 Trip and parcel created successfully! Trip: {trip_id}, Parcel: {workflow_results['parcel_result'].get('parcel_id')}"
+                    },
+                    agent_name="AgentManager"
+                )
+            else:
+                workflow_results["steps"].append(f"✗ Parcel creation failed: {parcel_response.error}")
+                return APIResponse(
+                    success=False,
+                    error=f"Parcel creation failed after successful trip creation: {parcel_response.error}",
+                    agent_name="AgentManager",
+                    data=workflow_results
+                )
+                
+        except Exception as e:
+            logger.error(f"AgentManager: CREATE_TRIP_AND_PARCEL workflow error: {str(e)}")
+            workflow_results["steps"].append(f"✗ Workflow error: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager",
+                data=workflow_results
+            )
 
 # Global agent manager instance
 agent_manager = AgentManager()

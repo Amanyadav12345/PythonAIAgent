@@ -12,3 +12,5 @@ passlib[bcrypt]
 python-multipart
 sqlalchemy
 duckduckgo-search
+google-generativeai
+httpx

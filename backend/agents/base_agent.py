@@ -107,6 +107,7 @@ class BaseAPIAgent(ABC):
                 
                 if response.status_code in [200, 201]:
                     data = response.json() if response.content else {}
+                    logger.info(f"{self.name}: SUCCESS Response data: {json.dumps(data, indent=2)}")
                     return APIResponse(
                         success=True,
                         data=data,

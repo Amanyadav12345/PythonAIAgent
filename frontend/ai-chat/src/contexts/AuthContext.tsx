@@ -68,9 +68,57 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     const checkAuth = async () => {
+      // Check for all auth-related localStorage items
+      const basicAuth = localStorage.getItem('basic_auth');
       const token = localStorage.getItem('token');
-      if (token) {
+      const userInfo = localStorage.getItem('user_info');
+      const authDetails = localStorage.getItem('auth_details');
+      const authApiResponse = localStorage.getItem('auth_api_response');
+      
+      if (basicAuth && (userInfo || authDetails)) {
         try {
+          // If we have basic auth and user info, restore from localStorage
+          // Prefer authDetails over userInfo as it has more complete data
+          let userRecord;
+          if (authDetails) {
+            userRecord = JSON.parse(authDetails);
+          } else if (userInfo) {
+            userRecord = JSON.parse(userInfo);
+          } else {
+            throw new Error('No user data available');
+          }
+          
+          const userData: User = {
+            username: userRecord.username || userRecord.auth_field || userRecord._id,
+            email: userRecord.email,
+            full_name: userRecord.name,
+            user_id: userRecord.user_id || userRecord._id,
+            name: userRecord.name,
+            phone: userRecord.phone?.number,
+            current_company: userRecord.current_company,
+            user_type: userRecord.user_type,
+            role_names: userRecord.role_names,
+            token: userRecord.token
+          };
+          setUser(userData);
+          
+          console.log('✅ Restored user from localStorage:', {
+            user_id: userData.user_id,
+            username: userData.username,
+            current_company: userData.current_company,
+            name: userData.name
+          });
+        } catch (error) {
+          console.error('Error parsing user info from localStorage:', error);
+          // Clear invalid data
+          localStorage.removeItem('basic_auth');
+          localStorage.removeItem('user_info');
+          localStorage.removeItem('auth_details');
+          localStorage.removeItem('auth_api_response');
+        }
+      } else if (token) {
+        try {
+          // Fallback to API call for Bearer token auth
           const userData = await authAPI.getMe();
           setUser(userData);
         } catch (error) {

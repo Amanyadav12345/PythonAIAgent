@@ -7,7 +7,12 @@
       "Bash(pip install:*)",
       "Bash(start-backend.bat)",
       "Bash(start-frontend.bat)",
-      "Bash(npm start)"
+      "Bash(npm start)",
+      "Bash(npm run build:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:35.244.19.78)",
+      "Bash(del debug_parcel_context.py test_parcel_payload.py)",
+      "Bash(del test_current_company_fix.py test_missing_company.py)"
     ],
     "deny": [],
     "ask": []
