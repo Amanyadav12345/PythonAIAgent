@@ -715,8 +715,9 @@ class AgentManager:
                 if consignor_response.success:
                     logger.info("AgentManager: Consignor selection initiated")
                     
-                    # Get the formatted message with partner options
+                    # Get the formatted message with partner options and button data
                     formatted_partners = consignor_response.data.get("formatted_message", "")
+                    button_data = consignor_response.data.get("button_data", {})
                     
                     # Create comprehensive message with parcel success + consignor selection
                     full_message = f"{response.data.get('message')}\n\n**NEXT STEP: Select a Consignor**\n\n{formatted_partners}"
@@ -728,8 +729,13 @@ class AgentManager:
                             "parcel_result": response.data,
                             "consignor_selection": consignor_response.data,
                             "message": full_message,
+                            "button_data": button_data,
+                            "available_partners": consignor_response.data.get("available_partners", []),
+                            "current_page": consignor_response.data.get("current_page", 0),
                             "requires_user_input": True,
-                            "input_type": "consignor_selection"
+                            "input_type": "consignor_selection",
+                            "partner_buttons": button_data.get("buttons", []),
+                            "action_buttons": button_data.get("action_buttons", [])
                         },
                         agent_name="AgentManager"
                     )
@@ -816,23 +822,47 @@ class AgentManager:
                 if consignor_response.success:
                     workflow_results["steps"].append("✓ Consignor selection initiated")
                     workflow_results["consignor_selection"] = consignor_response.data
+                    
+                    # Get the formatted message and button data
+                    formatted_partners = consignor_response.data.get("formatted_message", "")
+                    button_data = consignor_response.data.get("button_data", {})
+                    success_message = f"Successfully created trip ({trip_id}) and parcel ({parcel_id}).\n\n{formatted_partners}"
+                    
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "workflow": "CREATE_TRIP_AND_PARCEL",
+                            "trip_id": trip_id,
+                            "parcel_id": parcel_id,
+                            "workflow_details": workflow_results,
+                            "consignor_selection": workflow_results.get("consignor_selection"),
+                            "message": success_message,
+                            "button_data": button_data,
+                            "available_partners": consignor_response.data.get("available_partners", []),
+                            "current_page": consignor_response.data.get("current_page", 0),
+                            "company_id": consignor_response.data.get("company_id"),
+                            "requires_user_input": True,
+                            "input_type": "consignor_selection",
+                            "partner_buttons": button_data.get("buttons", []),
+                            "action_buttons": button_data.get("action_buttons", [])
+                        },
+                        agent_name="AgentManager"
+                    )
                 else:
                     workflow_results["steps"].append(f"⚠ Consignor selection failed: {consignor_response.error}")
-                
-                return APIResponse(
-                    success=True,
-                    data={
-                        "workflow": "CREATE_TRIP_AND_PARCEL",
-                        "trip_id": trip_id,
-                        "parcel_id": parcel_id,
-                        "workflow_details": workflow_results,
-                        "consignor_selection": workflow_results.get("consignor_selection"),
-                        "message": f"Successfully created trip ({trip_id}) and parcel ({parcel_id}).\n\n**NEXT STEP: Select a Consignor**\n\nPlease choose from the available preferred partners below:",
-                        "requires_user_input": True,
-                        "input_type": "consignor_selection"
-                    },
-                    agent_name="AgentManager"
-                )
+                    
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "workflow": "CREATE_TRIP_AND_PARCEL",
+                            "trip_id": trip_id,
+                            "parcel_id": parcel_id,
+                            "workflow_details": workflow_results,
+                            "message": f"Successfully created trip ({trip_id}) and parcel ({parcel_id}). (Consignor selection unavailable)",
+                            "requires_user_input": False
+                        },
+                        agent_name="AgentManager"
+                    )
             else:
                 workflow_results["steps"].append(f"✗ Parcel creation failed: {parcel_response.error}")
                 return APIResponse(
@@ -894,22 +924,33 @@ class AgentManager:
                 partners = response.data.get("partners", [])
                 
                 if partners:
-                    # Format partners for display
+                    # Format partners for display with button format
                     formatted_message = consignor_agent.format_partners_for_chat(
                         partners, 
                         response.data.get("page", 0)
                     )
                     
+                    # Create button data for frontend
+                    button_data = consignor_agent.format_partners_as_buttons(
+                        partners,
+                        response.data.get("page", 0)
+                    )
+                    button_data["has_more"] = response.data.get("has_more", False)
+                    
                     return APIResponse(
                         success=True,
                         data={
                             "partners": partners,
+                            "available_partners": partners,  # Store for selection handling
                             "formatted_message": formatted_message,
+                            "button_data": button_data,
                             "has_more": response.data.get("has_more", False),
-                            "page": response.data.get("page", 0),
+                            "current_page": response.data.get("page", 0),
                             "total_available": response.data.get("total_available", 0),
                             "trip_id": trip_id,
-                            "parcel_id": parcel_id
+                            "parcel_id": parcel_id,
+                            "requires_user_input": True,
+                            "input_type": "partner_selection"
                         },
                         agent_name="AgentManager"
                     )
@@ -1001,38 +1042,117 @@ class AgentManager:
                     agent_name="AgentManager"
                 )
                 
-            elif user_input.isdigit():
-                # User selected a partner by number
-                selection_number = int(user_input)
-                partner_id = data.get("partner_id")
-                partner_name = data.get("partner_name", f"Partner {selection_number}")
+            elif user_input.isdigit() or self._is_button_selection(user_input, data.get("available_partners", [])) or self._is_partner_name_selection(user_input, data.get("available_partners", [])):
+                # User selected a partner by number, button text, or direct name
+                available_partners = data.get("available_partners", [])
+                selected_partner = None
                 
-                if partner_id:
+                if user_input.isdigit():
+                    selection_number = int(user_input)
+                    if 1 <= selection_number <= len(available_partners):
+                        selected_partner = available_partners[selection_number - 1]
+                elif self._is_button_selection(user_input, available_partners):
+                    # Extract number from button text like "1. Partner Name"
+                    selection_number = self._extract_number_from_button_text(user_input)
+                    if selection_number and 1 <= selection_number <= len(available_partners):
+                        selected_partner = available_partners[selection_number - 1]
+                else:
+                    # Direct partner name selection
+                    selected_partner = self._find_partner_by_name(user_input, available_partners)
+                
+                if selected_partner:
+                    partner_name = selected_partner["name"]
+                    partner_id = selected_partner.get("id")
+                    partner_city = selected_partner.get("city", "Unknown City")
+                    
+                    # Call getUserCompany API for the selected partner
+                    user_companies_response = await self._call_get_user_companies_api(partner_id)
+                    
+                    trip_id = data.get("trip_id", "")
+                    parcel_id = data.get("parcel_id", "")
+                    
+                    if user_companies_response.get("success"):
+                        companies_data = user_companies_response.get("companies", [])
+                        
+                        # Check if partner has multiple companies - if so, show company selection
+                        if len(companies_data) > 1:
+                            # Multiple companies - user needs to select one
+                            if "user_company" in self.agents:
+                                user_company_agent = self.agents["user_company"]
+                                formatted_companies = user_company_agent.format_companies_for_selection(companies_data)
+                                company_buttons = user_company_agent.format_companies_as_buttons(companies_data)
+                                
+                                return APIResponse(
+                                    success=True,
+                                    data={
+                                        "action": "company_selection_required",
+                                        "step": "company_selection",
+                                        "selected_partner": {
+                                            "id": partner_id,
+                                            "name": partner_name,
+                                            "city": partner_city
+                                        },
+                                        "companies": companies_data,
+                                        "formatted_message": f"**Partner Selected:** {partner_name}\n\n{formatted_companies}",
+                                        "button_data": company_buttons,
+                                        "trip_id": trip_id,
+                                        "parcel_id": parcel_id,
+                                        "requires_user_input": True,
+                                        "input_type": "company_selection"
+                                    },
+                                    agent_name="AgentManager"
+                                )
+                        
+                        # Single company or no companies - proceed with selection
+                        selected_company = companies_data[0] if companies_data else None
+                        companies_info = f"\n**Partner Company:** {selected_company.get('name', 'N/A')}" if selected_company else "\n**Partner Companies:** No companies found"
+                    else:
+                        companies_data = []
+                        selected_company = None
+                        companies_info = f"\n**Partner Companies:** Error fetching companies - {user_companies_response.get('error', 'Unknown error')}"
+                    
+                    # Create confirmation message
+                    confirmation_message = f"✅ **Partner Selected Successfully**\n\n"
+                    confirmation_message += f"**Selected Partner:** {partner_name}\n"
+                    confirmation_message += f"**Location:** {partner_city}\n"
+                    confirmation_message += f"**Partner ID:** {partner_id}\n"
+                    confirmation_message += companies_info
+                    
+                    if parcel_id:
+                        confirmation_message += f"\n\n📦 **Parcel ID:** {parcel_id}"
+                    if trip_id:
+                        confirmation_message += f"\n🚛 **Trip ID:** {trip_id}"
+                    
+                    confirmation_message += f"\n\n🎉 Your parcel is now linked with {partner_name}!"
+                    
+                    # Update consignor selection
                     response = await consignor_agent.execute(APIIntent.UPDATE, {
                         "partner_id": partner_id,
                         "partner_name": partner_name
                     })
                     
-                    if response.success:
-                        return APIResponse(
-                            success=True,
-                            data={
-                                "action": "consignor_selected",
-                                "selected_partner": response.data,
-                                "message": response.data.get("message", f"Selected {partner_name} as consignor")
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "action": "consignor_selected",
+                            "selected_partner": {
+                                "id": partner_id,
+                                "name": partner_name,
+                                "city": partner_city,
+                                "companies": companies_data,
+                                "selected_company": selected_company
                             },
-                            agent_name="AgentManager"
-                        )
-                    else:
-                        return APIResponse(
-                            success=False,
-                            error=f"Failed to select consignor: {response.error}",
-                            agent_name="AgentManager"
-                        )
+                            "message": confirmation_message,
+                            "trip_id": trip_id,
+                            "parcel_id": parcel_id,
+                            "user_companies_response": user_companies_response
+                        },
+                        agent_name="AgentManager"
+                    )
                 else:
                     return APIResponse(
                         success=False,
-                        error="Invalid selection. Please provide a valid partner number.",
+                        error=f"Invalid selection. Please enter a number between 1 and {len(available_partners)}, 'more' for more options, or 'skip' to continue.",
                         agent_name="AgentManager"
                     )
             else:
@@ -1044,6 +1164,202 @@ class AgentManager:
                 
         except Exception as e:
             logger.error(f"AgentManager: Error handling consignor selection: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+    
+    async def _call_get_user_companies_api(self, user_id: str) -> Dict[str, Any]:
+        """
+        Call the getUserCompany API for the selected partner
+        """
+        try:
+            import httpx
+            
+            # Build the API URL
+            api_url = f"https://35.244.19.78:8042/get_user_companies"
+            params = {"user_id": user_id}
+            
+            print(f"AgentManager: Calling getUserCompany API for user_id: {user_id}")
+            print(f"AgentManager: API URL: {api_url}")
+            
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                # Use Basic Auth
+                auth = (self.agents["consignor_selector"].auth_config["username"], 
+                       self.agents["consignor_selector"].auth_config["password"])
+                
+                response = await client.get(api_url, params=params, auth=auth)
+                
+                print(f"AgentManager: getUserCompany API status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"AgentManager: getUserCompany API success: found companies")
+                    
+                    return {
+                        "success": True,
+                        "companies": data.get("companies", []),
+                        "total": data.get("_meta", {}).get("total", 0) if isinstance(data, dict) else 0,
+                        "raw_response": data
+                    }
+                else:
+                    error_text = response.text
+                    print(f"AgentManager: getUserCompany API error: {error_text}")
+                    
+                    return {
+                        "success": False,
+                        "error": f"API call failed with status {response.status_code}: {error_text}",
+                        "status_code": response.status_code
+                    }
+                    
+        except Exception as e:
+            print(f"AgentManager: Exception calling getUserCompany API: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Exception calling getUserCompany API: {str(e)}"
+            }
+
+    def _is_button_selection(self, user_input: str, available_partners: List[Dict]) -> bool:
+        """Check if user input matches a button text format"""
+        # Check if it matches pattern like "1. Partner Name"
+        import re
+        pattern = r'^\d+\.\s'
+        if re.match(pattern, user_input):
+            return True
+        
+        # Check if it matches any partner button text
+        for i, partner in enumerate(available_partners, 1):
+            button_text = f"{i}. {partner['name']}"
+            if user_input.strip() == button_text.strip():
+                return True
+        
+        return False
+
+    def _extract_number_from_button_text(self, button_text: str) -> int:
+        """Extract number from button text like '1. Partner Name'"""
+        import re
+        match = re.match(r'^(\d+)\.', button_text.strip())
+        if match:
+            return int(match.group(1))
+        
+        # Fallback: check against available partners
+        # This is handled in the calling method
+        return 0
+
+    def _is_partner_name_selection(self, user_input: str, available_partners: List[Dict]) -> bool:
+        """Check if user input matches a partner name"""
+        user_input_clean = user_input.strip().lower()
+        
+        for partner in available_partners:
+            partner_name = partner.get('name', '').strip().lower()
+            if user_input_clean == partner_name:
+                return True
+        
+        return False
+
+    def _find_partner_by_name(self, user_input: str, available_partners: List[Dict]) -> Dict:
+        """Find partner by exact name match"""
+        user_input_clean = user_input.strip().lower()
+        
+        for partner in available_partners:
+            partner_name = partner.get('name', '').strip().lower()
+            if user_input_clean == partner_name:
+                return partner
+        
+        return None
+    
+    async def handle_company_selection(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Handle user's company selection after partner selection
+        Called when a partner has multiple companies and user needs to choose one
+        """
+        logger.info("AgentManager: Handling company selection")
+        
+        try:
+            # Get the selected partner info
+            selected_partner = data.get("selected_partner", {})
+            companies = data.get("companies", [])
+            user_selection = data.get("selection", "").strip()
+            trip_id = data.get("trip_id", "")
+            parcel_id = data.get("parcel_id", "")
+            
+            if not selected_partner or not companies:
+                return APIResponse(
+                    success=False,
+                    error="Missing partner or company information for selection",
+                    agent_name="AgentManager"
+                )
+            
+            # Find the selected company
+            selected_company = None
+            
+            # Try to match by company name
+            for company in companies:
+                if user_selection.lower() == company.get("name", "").lower():
+                    selected_company = company
+                    break
+            
+            # If not found by name, try by index if it's a number
+            if not selected_company and user_selection.isdigit():
+                selection_index = int(user_selection) - 1
+                if 0 <= selection_index < len(companies):
+                    selected_company = companies[selection_index]
+            
+            if not selected_company:
+                return APIResponse(
+                    success=False,
+                    error=f"Invalid company selection. Please choose from the available companies.",
+                    agent_name="AgentManager"
+                )
+            
+            # Complete the consignor selection with the chosen company
+            partner_name = selected_partner.get("name")
+            partner_id = selected_partner.get("id")
+            partner_city = selected_partner.get("city", "Unknown City")
+            company_name = selected_company.get("name")
+            
+            # Create final confirmation message
+            confirmation_message = f"✅ **Selection Complete**\n\n"
+            confirmation_message += f"**Selected Partner:** {partner_name}\n"
+            confirmation_message += f"**Location:** {partner_city}\n"
+            confirmation_message += f"**Partner ID:** {partner_id}\n"
+            confirmation_message += f"**Selected Company:** {company_name}\n"
+            
+            if parcel_id:
+                confirmation_message += f"\n📦 **Parcel ID:** {parcel_id}"
+            if trip_id:
+                confirmation_message += f"\n🚛 **Trip ID:** {trip_id}"
+            
+            confirmation_message += f"\n\n🎉 Your parcel is now linked with {partner_name} ({company_name})!"
+            
+            # Update consignor selection
+            if "consignor_selector" in self.agents:
+                consignor_agent = self.agents["consignor_selector"]
+                await consignor_agent.execute(APIIntent.UPDATE, {
+                    "partner_id": partner_id,
+                    "partner_name": partner_name
+                })
+            
+            return APIResponse(
+                success=True,
+                data={
+                    "action": "consignor_and_company_selected",
+                    "selected_partner": {
+                        "id": partner_id,
+                        "name": partner_name,
+                        "city": partner_city,
+                        "selected_company": selected_company
+                    },
+                    "message": confirmation_message,
+                    "trip_id": trip_id,
+                    "parcel_id": parcel_id
+                },
+                agent_name="AgentManager"
+            )
+            
+        except Exception as e:
+            logger.error(f"AgentManager: Error handling company selection: {str(e)}")
             return APIResponse(
                 success=False,
                 error=str(e),

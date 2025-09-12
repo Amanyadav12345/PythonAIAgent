@@ -27,6 +27,13 @@ class ChatResponse(BaseModel):
     sources: list[str] = []
     tools_used: list[str] = []
     data: Optional[Dict[str, Any]] = None
+    button_data: Optional[Dict[str, Any]] = None
+    partner_buttons: Optional[list] = None
+    action_buttons: Optional[list] = None
+    requires_user_input: Optional[bool] = None
+    input_type: Optional[str] = None
+    available_partners: Optional[list] = None
+    current_page: Optional[int] = None
 
 class ResearchResponse(BaseModel):
     topic: str
@@ -236,7 +243,15 @@ class AgentService:
                 return ChatResponse(
                     response=response.data.get("message", "Parcel created successfully!"),
                     sources=[],
-                    tools_used=["ParcelCreationAgent"]
+                    tools_used=["ParcelCreationAgent"],
+                    data=response.data,
+                    button_data=response.data.get("button_data"),
+                    partner_buttons=response.data.get("partner_buttons"),
+                    action_buttons=response.data.get("action_buttons"),
+                    requires_user_input=response.data.get("requires_user_input"),
+                    input_type=response.data.get("input_type"),
+                    available_partners=response.data.get("available_partners"),
+                    current_page=response.data.get("current_page")
                 )
             else:
                 return ChatResponse(
@@ -273,7 +288,14 @@ class AgentService:
                     response=response.get("message", "Trip and parcel created successfully!"),
                     sources=[],
                     tools_used=["GeminiService", "TripCreationAgent", "ParcelCreationAgent", "CityLookupAPI"],
-                    data=response  # Pass through all response data including consignor selection
+                    data=response,  # Pass through all response data including consignor selection
+                    button_data=response.get("button_data"),
+                    partner_buttons=response.get("partner_buttons"),
+                    action_buttons=response.get("action_buttons"),
+                    requires_user_input=response.get("requires_user_input"),
+                    input_type=response.get("input_type"),
+                    available_partners=response.get("available_partners"),
+                    current_page=response.get("current_page")
                 )
             else:
                 error_message = response.get("error", "Unknown error occurred")
@@ -315,7 +337,15 @@ class AgentService:
                     return ChatResponse(
                         response=response.data.get("message", "Trip and parcel created successfully!"),
                         sources=[],
-                        tools_used=["TripCreationAgent", "ParcelCreationAgent"]
+                        tools_used=["TripCreationAgent", "ParcelCreationAgent"],
+                        data=response.data,
+                        button_data=response.data.get("button_data"),
+                        partner_buttons=response.data.get("partner_buttons"),
+                        action_buttons=response.data.get("action_buttons"),
+                        requires_user_input=response.data.get("requires_user_input"),
+                        input_type=response.data.get("input_type"),
+                        available_partners=response.data.get("available_partners"),
+                        current_page=response.data.get("current_page")
                     )
                 else:
                     return ChatResponse(

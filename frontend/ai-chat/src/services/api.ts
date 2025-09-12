@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { LoginRequest, LoginResponse, User, ChatResponse } from '../types/api';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8001';
 const AUTH_API_BASE_URL = 'https://35.244.19.78:8042';
 
 const api = axios.create({
@@ -248,6 +248,30 @@ export const chatAPI = {
     const user_id = localStorage.getItem('user_id') || '';
     const response = await api.post('/chat', { message, user_id });
     return response.data;
+  },
+
+  getUserCompanies: async (userId: string): Promise<any> => {
+    try {
+      // Get basic auth from localStorage
+      const basicAuth = localStorage.getItem('basic_auth');
+      
+      // Make direct API call to the external API
+      const response = await axios.get(`https://35.244.19.78:8042/get_user_companies`, {
+        params: { user_id: userId },
+        headers: {
+          'Authorization': `Basic ${basicAuth}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000,
+        // For development - ignore SSL certificate issues
+        httpsAgent: false,
+      });
+      
+      return response.data;
+    } catch (error: any) {
+      console.error('getUserCompanies API Error:', error);
+      throw error;
+    }
   },
 };
 

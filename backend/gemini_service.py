@@ -676,6 +676,12 @@ If something cannot be identified, set the field to null but keep the structure.
                 response_data["requires_user_input"] = parcel_response.data.get("requires_user_input")
                 response_data["input_type"] = parcel_response.data.get("input_type")
                 response_data["consignor_selection"] = parcel_response.data.get("consignor_selection")
+                # Include button data for frontend
+                response_data["button_data"] = parcel_response.data.get("button_data")
+                response_data["partner_buttons"] = parcel_response.data.get("partner_buttons")
+                response_data["action_buttons"] = parcel_response.data.get("action_buttons")
+                response_data["available_partners"] = parcel_response.data.get("available_partners")
+                response_data["current_page"] = parcel_response.data.get("current_page")
             
             return response_data
             

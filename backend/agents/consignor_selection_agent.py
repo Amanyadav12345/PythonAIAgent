@@ -206,24 +206,102 @@ class ConsignorSelectionAgent(BaseAPIAgent):
             )
     
     def format_partners_for_chat(self, partners: List[Dict[str, Any]], page: int = 0) -> str:
-        """Format partners list for chat display"""
+        """Format partners list for chat display with clickable button names"""
         if not partners:
             return "No preferred partners available for selection."
         
-        message = f"**Available Preferred Partners (Page {page + 1}):**\n\n"
+        message = f"**Select a Consignor/Consignee:**\n\n"
         
+        # Show each partner as a clickable button
         for i, partner in enumerate(partners, 1):
-            display_num = (page * 5) + i
-            message += f"{display_num}. **{partner['name']}**\n"
-            message += f"   Location: {partner['city']}\n"
+            partner_name = partner['name']
+            city = partner['city'] if partner['city'] != 'Unknown City' else 'Unknown City'
+            
+            # Create individual button for each partner name
+            message += f"🔵 `{partner_name}`\n"
+            message += f"   📍 {city}"
             if partner.get('company_info'):
-                message += f"   Company: {partner['company_info']}\n"
-            message += "\n"
+                message += f" • {partner['company_info']}"
+            message += "\n\n"
         
-        message += "Please select a partner by typing the number (e.g., '1', '2', '3')\n"
-        message += "Type 'more' to see more partners or 'skip' to continue without selecting."
+        # Action buttons
+        message += f"🔵 `Show More Partners`     🔵 `Skip Selection`\n\n"
+        message += "💡 **Click on any partner name button above to select them.**"
         
         return message
+    
+    def format_partners_as_buttons(self, partners: List[Dict[str, Any]], page: int = 0) -> Dict[str, Any]:
+        """Format partners as button data for frontend"""
+        if not partners:
+            return {
+                "buttons": [],
+                "message": "No preferred partners available for selection.",
+                "has_action_buttons": True,
+                "action_buttons": [
+                    {"text": "Skip Partner Selection", "value": "skip", "style": "secondary"}
+                ]
+            }
+        
+        # Create partner selection buttons
+        partner_buttons = []
+        for i, partner in enumerate(partners, 1):
+            display_num = (page * 5) + i
+            partner_name = partner['name']
+            city = partner['city']
+            
+            # Use partner name directly as button text
+            button_text = partner_name
+            if len(button_text) > 35:
+                button_text = f"{partner_name[:32]}..."
+            
+            partner_buttons.append({
+                "text": button_text,  # Clean partner name as button text
+                "value": partner_name,  # Partner name as value for API calls
+                "style": "primary",
+                "subtitle": f"📍 {city}",
+                "partner_data": {
+                    "id": partner['id'],
+                    "name": partner['name'],
+                    "city": partner['city'],
+                    "display_number": i
+                },
+                "api_data": {
+                    "partner_id": partner['id'],
+                    "partner_name": partner['name'],
+                    "selection_type": "partner"
+                }
+            })
+        
+        # Create action buttons
+        action_buttons = [
+            {
+                "text": "Show More Partners", 
+                "value": "Show More Partners", 
+                "style": "secondary",
+                "api_data": {
+                    "selection_type": "more",
+                    "action": "show_more"
+                }
+            },
+            {
+                "text": "Skip Selection", 
+                "value": "Skip Selection", 
+                "style": "outline",
+                "api_data": {
+                    "selection_type": "skip",
+                    "action": "skip_selection"
+                }
+            }
+        ]
+        
+        return {
+            "buttons": partner_buttons,
+            "action_buttons": action_buttons,
+            "message": f"Select a preferred partner from the options below:",
+            "page": page,
+            "total_partners": len(partners),
+            "has_more": True  # This should be determined by the caller
+        }
     
     def get_supported_intents(self) -> List[APIIntent]:
         """Return list of supported intents"""

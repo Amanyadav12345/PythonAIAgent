@@ -237,10 +237,48 @@ async def direct_auth(login_request: LoginRequest):
             detail=f"Authentication service error: {str(e)}"
         )
 
+class UserCompaniesRequest(BaseModel):
+    user_id: str
+
+@app.post("/user_companies")
+async def get_user_companies(
+    request: Request,
+    user_request: UserCompaniesRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Get companies for a specific user (used when selecting consignors)"""
+    user_id = user_request.user_id
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id is required"
+        )
+    
+    try:
+        # Use the agent manager's method to call getUserCompany API
+        companies_response = await agent_manager._call_get_user_companies_api(user_id)
+        
+        if companies_response.get("success"):
+            return {
+                "success": True,
+                "companies": companies_response.get("companies", []),
+                "total": companies_response.get("total", 0)
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Failed to get companies: {companies_response.get('error', 'Unknown error')}"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching user companies: {str(e)}"
+        )
+
 @app.get("/")
 async def root():
     return {"message": "🚛 Truck & Rolling Radius Management API is running"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
