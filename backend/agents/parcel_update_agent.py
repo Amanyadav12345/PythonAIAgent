@@ -205,20 +205,48 @@ class ParcelUpdateAgent(BaseAPIAgent):
         try:
             parcel_id = data.get("parcel_id")
             final_data = data.get("final_data", {})
-            
+
             if not parcel_id:
                 return APIResponse(
                     success=False,
                     error="parcel_id is required for consigner/consignee update",
                     agent_name=self.name
                 )
-            
+
             if not final_data:
                 return APIResponse(
                     success=False,
                     error="final_data from consigner/consignee selection is required",
                     agent_name=self.name
                 )
+
+            # Extract _etag from final_data (passed from ConsignerConsigneeAgent)
+            parcel_etag = final_data.get("parcel_etag") or data.get("_etag")
+
+            # COMPREHENSIVE LOGGING - ParcelUpdateAgent execution starts
+            print(f"ParcelUpdateAgent: ==========================================")
+            print(f"ParcelUpdateAgent: PARCEL UPDATE AGENT EXECUTING")
+            print(f"ParcelUpdateAgent: ==========================================")
+            print(f"ParcelUpdateAgent: ← Triggered by: AgentManager (automatic chain)")
+            print(f"ParcelUpdateAgent: → Parcel ID: {parcel_id}")
+            print(f"ParcelUpdateAgent: → Trip ID: {final_data.get('trip_id')}")
+            if parcel_etag:
+                print(f"ParcelUpdateAgent: → Using _etag from selection workflow: {parcel_etag}")
+            else:
+                print(f"ParcelUpdateAgent: → No _etag provided, will fetch from API")
+            print(f"ParcelUpdateAgent: → Target API: PATCH /parcels/{parcel_id}")
+            print(f"ParcelUpdateAgent: → Headers will include: If-Match: {parcel_etag}")
+            print(f"ParcelUpdateAgent: ==========================================")
+
+            # Log the stored selection data
+            consigner_name = final_data.get('consigner_details', {}).get('name', 'N/A')
+            consignee_name = final_data.get('consignee_details', {}).get('name', 'N/A')
+            print(f"ParcelUpdateAgent: PROCESSING STORED BACKEND DATA:")
+            print(f"ParcelUpdateAgent: → Consigner (from backend): {consigner_name}")
+            print(f"ParcelUpdateAgent: → Consignee (from backend): {consignee_name}")
+            print(f"ParcelUpdateAgent: → Both selections retrieved from ConsignerConsigneeAgent storage")
+            print(f"ParcelUpdateAgent: → Ready to build complete PATCH payload...")
+            print(f"ParcelUpdateAgent: ==========================================")
             
             # Extract consigner/consignee details
             consigner_details = final_data.get("consigner_details", {})
@@ -236,14 +264,28 @@ class ParcelUpdateAgent(BaseAPIAgent):
             
             print(f"ParcelUpdateAgent: Built update payload for parcel {parcel_id}")
             
-            # Perform the update
+            # Perform the update with the stored _etag
             update_response = await self._update_parcel({
                 "parcel_id": parcel_id,
                 "update_payload": update_payload,
-                "_etag": data.get("_etag")
+                "_etag": parcel_etag  # Use _etag from selection workflow
             })
             
             if update_response.success:
+                # FINAL SUCCESS LOGGING
+                new_etag = update_response.data.get("_etag")
+                print(f"ParcelUpdateAgent: ==========================================")
+                print(f"ParcelUpdateAgent: ✅ PATCH API EXECUTION SUCCESSFUL!")
+                print(f"ParcelUpdateAgent: ==========================================")
+                print(f"ParcelUpdateAgent: → Parcel {parcel_id} updated successfully")
+                print(f"ParcelUpdateAgent: → Original _etag: {parcel_etag}")
+                print(f"ParcelUpdateAgent: → New _etag returned: {new_etag}")
+                print(f"ParcelUpdateAgent: → Consigner data applied: {consigner_name}")
+                print(f"ParcelUpdateAgent: → Consignee data applied: {consignee_name}")
+                print(f"ParcelUpdateAgent: → PATCH API: https://35.244.19.78:8042/parcels/{parcel_id}")
+                print(f"ParcelUpdateAgent: → Status: 200 OK ✅")
+                print(f"ParcelUpdateAgent: ==========================================")
+
                 return APIResponse(
                     success=True,
                     data={

@@ -233,11 +233,13 @@ class ParcelCreationAgent(BaseAPIAgent):
             if response.success:
                 parcel_data = response.data
                 parcel_id = parcel_data.get('_id')
-                
+                parcel_etag = parcel_data.get('_etag')  # Extract _etag from parcel creation response
+
                 return APIResponse(
                     success=True,
                     data={
                         "parcel_id": parcel_id,
+                        "parcel_etag": parcel_etag,  # Include _etag for subsequent PATCH operations
                         "trip_id": trip_id,
                         "parcel_details": parcel_data,
                         "identification_result": identification_result,

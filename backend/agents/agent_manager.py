@@ -711,10 +711,16 @@ class AgentManager:
             
             if response.success:
                 logger.info(f"AgentManager: Parcel created successfully with ID: {response.data.get('parcel_id')}")
-                
+
                 # Trigger NEW consigner/consignee selection after successful parcel creation
                 parcel_id = response.data.get('parcel_id')
-                consigner_response = await self._trigger_consigner_consignee_flow(data, trip_id, parcel_id)
+                parcel_etag = response.data.get('parcel_etag')  # Get _etag from parcel creation
+
+                # Pass _etag through the data for consigner/consignee flow
+                enhanced_data = data.copy()
+                enhanced_data['parcel_etag'] = parcel_etag
+
+                consigner_response = await self._trigger_consigner_consignee_flow(enhanced_data, trip_id, parcel_id)
                 
                 if consigner_response.success:
                     logger.info("AgentManager: Consigner/Consignee selection initiated")
@@ -818,10 +824,16 @@ class AgentManager:
             if parcel_response.success:
                 workflow_results["steps"].append("✓ Parcel created successfully")
                 workflow_results["parcel_result"] = parcel_response.data.get("parcel_result")
-                
+
                 # Step 3: Trigger NEW consigner/consignee selection after successful parcel creation
                 parcel_id = workflow_results["parcel_result"].get("parcel_id")
-                consigner_response = await self._trigger_consigner_consignee_flow(data, trip_id, parcel_id)
+                parcel_etag = workflow_results["parcel_result"].get("parcel_etag")  # Get _etag from parcel creation
+
+                # Pass _etag through the data for consigner/consignee flow
+                enhanced_data = data.copy()
+                enhanced_data['parcel_etag'] = parcel_etag
+
+                consigner_response = await self._trigger_consigner_consignee_flow(enhanced_data, trip_id, parcel_id)
                 
                 if consigner_response.success:
                     workflow_results["steps"].append("✓ Consigner selection initiated")
@@ -916,6 +928,7 @@ class AgentManager:
                 "company_id": company_id,
                 "trip_id": trip_id,
                 "parcel_id": parcel_id,
+                "parcel_etag": data.get("parcel_etag"),  # Pass _etag from parcel creation
                 "user_context": {
                     "user_id": data.get("user_id"),
                     "current_company": company_id,
@@ -1358,6 +1371,7 @@ class AgentManager:
                 "company_id": company_id,
                 "trip_id": data.get("trip_id"),
                 "parcel_id": data.get("parcel_id"),
+                "parcel_etag": data.get("parcel_etag"),  # Pass _etag through the chain
                 "user_context": {
                     "user_id": data.get("user_id"),
                     "current_company": company_id,
@@ -1440,8 +1454,24 @@ class AgentManager:
                     # Both selections complete - now update the parcel
                     final_data = response.data.get("final_data")
                     parcel_id = final_data.get("parcel_id")
-                    
+
+                    # COMPREHENSIVE LOGGING - Both selections stored in backend
+                    print(f"AgentManager: ==========================================")
+                    print(f"AgentManager: BOTH SELECTIONS STORED - TRIGGERING UPDATE")
+                    print(f"AgentManager: ==========================================")
+                    print(f"AgentManager: ✅ Consigner stored: {final_data.get('consigner_details', {}).get('name')}")
+                    print(f"AgentManager: ✅ Consignee stored: {final_data.get('consignee_details', {}).get('name')}")
+                    print(f"AgentManager: → Parcel ID: {parcel_id}")
+                    print(f"AgentManager: → Trip ID: {final_data.get('trip_id')}")
+                    print(f"AgentManager: → Stored _etag: {final_data.get('parcel_etag')}")
+                    print(f"AgentManager: → API Endpoint: /preferred_partners (same for both)")
+                    print(f"AgentManager: → Next Action: Executing ParcelUpdateAgent")
+                    print(f"AgentManager: ==========================================")
+
                     if parcel_id and "parcel_updater" in self.agents:
+                        # Log the automatic trigger
+                        print(f"AgentManager: 🚀 AUTOMATIC TRIGGER: ConsignerConsigneeAgent → ParcelUpdateAgent")
+
                         # Automatically update the parcel with consigner/consignee details
                         update_response = await self._update_parcel_with_selections(final_data, data)
                         

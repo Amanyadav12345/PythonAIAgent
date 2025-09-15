@@ -30,6 +30,7 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             "current_step": "consigner",  # 'consigner' or 'consignee'
             "trip_id": None,
             "parcel_id": None,
+            "parcel_etag": None,  # Store _etag from parcel creation
             "user_context": {}
         }
     
@@ -61,16 +62,26 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             # Store context for the selection process
             self.selection_data["trip_id"] = data.get("trip_id")
             self.selection_data["parcel_id"] = data.get("parcel_id")
+            self.selection_data["parcel_etag"] = data.get("parcel_etag")  # Store _etag from parcel creation
             self.selection_data["user_context"] = data.get("user_context", {})
             self.selection_data["current_step"] = "consigner"
             
             # Fetch preferred partners
             company_id = data.get("company_id", "62d66794e54f47829a886a1d")
+
+            print(f"ConsignerConsigneeAgent: _initialize_selection_process calling _get_preferred_partners")
+            print(f"ConsignerConsigneeAgent: → Company ID: {company_id}")
+            print(f"ConsignerConsigneeAgent: → Page: 0, Page Size: 10")
+
             partners_response = await self._get_preferred_partners({
                 "company_id": company_id,
                 "page": 0,
                 "page_size": 10  # Get more partners initially
             })
+
+            print(f"ConsignerConsigneeAgent: _get_preferred_partners returned success: {partners_response.success}")
+            if not partners_response.success:
+                print(f"ConsignerConsigneeAgent: _get_preferred_partners ERROR: {partners_response.error}")
             
             if partners_response.success:
                 self.selection_data["shared_partners"] = partners_response.data.get("partners", [])
@@ -132,10 +143,19 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             }
             
             print(f"ConsignerConsigneeAgent: Searching for company_id: {company_id}")
-            
+            print(f"ConsignerConsigneeAgent: API URL: {self.base_url}")
+            print(f"ConsignerConsigneeAgent: Request params: {params}")
+
             response = await self._make_request("GET", "", params=params)
-            
+
+            print(f"ConsignerConsigneeAgent: API response success: {response.success}")
+            if response.data:
+                print(f"ConsignerConsigneeAgent: Response data keys: {list(response.data.keys())}")
+            else:
+                print(f"ConsignerConsigneeAgent: Response data is None")
+
             if not response.success:
+                print(f"ConsignerConsigneeAgent: API request FAILED: {response.error}")
                 return APIResponse(
                     success=False,
                     error=f"API request failed: {response.error or 'Unknown error'}",
@@ -143,8 +163,11 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
                 )
             
             items = response.data.get("_items", []) if response.data else []
-            
+
+            print(f"ConsignerConsigneeAgent: Found {len(items)} raw items from API")
+
             if not items:
+                print(f"ConsignerConsigneeAgent: No preferred partners found for company {company_id}")
                 return APIResponse(
                     success=True,
                     data={
@@ -165,9 +188,11 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
                 partner_info = self._extract_partner_info(item)
                 if partner_info:
                     partners.append(partner_info)
-            
+
             has_more = len(items) > end_idx
-            
+
+            print(f"ConsignerConsigneeAgent: Processed {len(partners)} valid partners for display")
+
             return APIResponse(
                 success=True,
                 data={
@@ -181,6 +206,9 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             )
             
         except Exception as e:
+            print(f"ConsignerConsigneeAgent: EXCEPTION in _get_preferred_partners: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return APIResponse(
                 success=False,
                 error=f"Error getting preferred partners: {str(e)}",
@@ -272,6 +300,35 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             if selection_type == "consigner":
                 self.selection_data["consigner"] = selected_partner
                 self.selection_data["current_step"] = "consignee"
+
+                # ENHANCED LOGGING - Store consigner data in backend
+                print(f"ConsignerConsigneeAgent: ========================================")
+                print(f"ConsignerConsigneeAgent: CONSIGNER SELECTED AND STORED IN BACKEND")
+                print(f"ConsignerConsigneeAgent: ========================================")
+                print(f"ConsignerConsigneeAgent: → Consigner ID: {selected_partner['id']}")
+                print(f"ConsignerConsigneeAgent: → Consigner Name: {selected_partner['name']}")
+                print(f"ConsignerConsigneeAgent: → Consigner City: {selected_partner['city']}")
+                print(f"ConsignerConsigneeAgent: → Company Info: {selected_partner.get('company_info', 'N/A')}")
+                print(f"ConsignerConsigneeAgent: → Parcel ID: {self.selection_data['parcel_id']}")
+                print(f"ConsignerConsigneeAgent: → Trip ID: {self.selection_data['trip_id']}")
+                print(f"ConsignerConsigneeAgent: → Stored _etag: {self.selection_data['parcel_etag']}")
+                print(f"ConsignerConsigneeAgent: → Backend Storage: SUCCESS ✅")
+                print(f"ConsignerConsigneeAgent: ========================================")
+
+                # Log the selection data structure for debugging
+                import json
+                selection_summary = {
+                    "action": "consigner_stored",
+                    "consigner_data": selected_partner,
+                    "parcel_id": self.selection_data['parcel_id'],
+                    "trip_id": self.selection_data['trip_id'],
+                    "parcel_etag": self.selection_data['parcel_etag'],
+                    "timestamp": self._get_current_timestamp(),
+                    "next_step": "consignee_selection"
+                }
+                print(f"ConsignerConsigneeAgent: STORED DATA: {json.dumps(selection_summary, indent=2)}")
+                print(f"ConsignerConsigneeAgent: Now requesting CONSIGNEE selection...")
+                print(f"ConsignerConsigneeAgent: ========================================")
                 
                 # Format consignee selection message
                 partners_to_show = self.selection_data["shared_partners"][:5]  # Show same list
@@ -297,6 +354,32 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             elif selection_type == "consignee":
                 self.selection_data["consignee"] = selected_partner
                 self.selection_data["current_step"] = "completed"
+
+                # ENHANCED LOGGING - Store consignee data in backend
+                print(f"ConsignerConsigneeAgent: ========================================")
+                print(f"ConsignerConsigneeAgent: CONSIGNEE SELECTED AND STORED IN BACKEND")
+                print(f"ConsignerConsigneeAgent: ========================================")
+                print(f"ConsignerConsigneeAgent: → Consignee ID: {selected_partner['id']}")
+                print(f"ConsignerConsigneeAgent: → Consignee Name: {selected_partner['name']}")
+                print(f"ConsignerConsigneeAgent: → Consignee City: {selected_partner['city']}")
+                print(f"ConsignerConsigneeAgent: → Company Info: {selected_partner.get('company_info', 'N/A')}")
+                print(f"ConsignerConsigneeAgent: → Backend Storage: SUCCESS ✅")
+                print(f"ConsignerConsigneeAgent: ========================================")
+
+                # Log both selections summary
+                both_selections_summary = {
+                    "action": "both_selections_complete",
+                    "consigner_data": self.selection_data["consigner"],
+                    "consignee_data": selected_partner,
+                    "parcel_id": self.selection_data['parcel_id'],
+                    "trip_id": self.selection_data['trip_id'],
+                    "parcel_etag": self.selection_data['parcel_etag'],
+                    "timestamp": self._get_current_timestamp(),
+                    "next_step": "trigger_parcel_update_agent"
+                }
+                print(f"ConsignerConsigneeAgent: BOTH SELECTIONS STORED: {json.dumps(both_selections_summary, indent=2)}")
+                print(f"ConsignerConsigneeAgent: Ready to trigger ParcelUpdateAgent...")
+                print(f"ConsignerConsigneeAgent: ========================================")
                 
                 # Get complete company details for both consigner and consignee
                 print(f"ConsignerConsigneeAgent: Getting complete details for API update...")
@@ -348,6 +431,7 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             "current_step": self.selection_data["current_step"],
             "trip_id": self.selection_data["trip_id"],
             "parcel_id": self.selection_data["parcel_id"],
+            "parcel_etag": self.selection_data["parcel_etag"],  # Include _etag in summary
             "completion_status": {
                 "consigner_selected": self.selection_data["consigner"] is not None,
                 "consignee_selected": self.selection_data["consignee"] is not None,
@@ -359,10 +443,11 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
         """Prepare final data structure for API integration"""
         consigner = self.selection_data["consigner"]
         consignee = self.selection_data["consignee"]
-        
+
         return {
             "trip_id": self.selection_data["trip_id"],
             "parcel_id": self.selection_data["parcel_id"],
+            "parcel_etag": self.selection_data["parcel_etag"],  # Include _etag for PATCH
             "consigner_details": {
                 "id": consigner["id"] if consigner else None,
                 "name": consigner["name"] if consigner else None,
@@ -452,14 +537,15 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
         
         return message
     
-    def format_consignee_selection_message(self, selected_consigner: Dict[str, Any], 
+    def format_consignee_selection_message(self, selected_consigner: Dict[str, Any],
                                          partners: List[Dict[str, Any]], page: int = 0) -> str:
         """Format message specifically for consignee selection after consigner is selected"""
         if not partners:
             return f"✅ Consigner selected: {selected_consigner['name']}\n\nNo partners available for consignee selection."
-        
-        message = f"✅ **CONSIGNER SELECTED:** {selected_consigner['name']} ({selected_consigner['city']})\n\n"
+
+        message = f"✅ **CONSIGNER STORED IN BACKEND:** {selected_consigner['name']} ({selected_consigner['city']})\n\n"
         message += "📋 **STEP 2: Select a CONSIGNEE (Receiver)**\n\n"
+        message += "**Using same Preferred Partners API:** `/preferred_partners`\n"
         message += "Choose who will be receiving the parcel:\n\n"
         
         # Show available partners (same list, but different purpose)
@@ -597,6 +683,7 @@ class ConsignerConsigneeAgent(BaseAPIAgent):
             "current_step": "consigner",
             "trip_id": None,
             "parcel_id": None,
+            "parcel_etag": None,  # Reset _etag storage
             "user_context": {}
         }
     
