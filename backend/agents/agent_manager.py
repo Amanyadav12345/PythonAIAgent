@@ -18,6 +18,8 @@ from .auth_agent import AuthAgent
 from .trip_creation_agent import TripCreationAgent
 from .parcel_creation_agent import ParcelCreationAgent
 from .consignor_selection_agent import ConsignorSelectionAgent
+from .consigner_consignee_agent import ConsignerConsigneeAgent
+from .parcel_update_agent import ParcelUpdateAgent
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -102,6 +104,8 @@ class AgentManager:
         self.agents["trip_creator"] = TripCreationAgent()
         self.agents["parcel_creator"] = ParcelCreationAgent()
         self.agents["consignor_selector"] = ConsignorSelectionAgent()
+        self.agents["consigner_consignee"] = ConsignerConsigneeAgent()
+        self.agents["parcel_updater"] = ParcelUpdateAgent()
         
         # Initialize cache for cities and materials data
         self._cached_cities = []
@@ -708,46 +712,46 @@ class AgentManager:
             if response.success:
                 logger.info(f"AgentManager: Parcel created successfully with ID: {response.data.get('parcel_id')}")
                 
-                # Trigger consignor selection after successful parcel creation
+                # Trigger NEW consigner/consignee selection after successful parcel creation
                 parcel_id = response.data.get('parcel_id')
-                consignor_response = await self._trigger_consignor_selection(data, trip_id, parcel_id)
+                consigner_response = await self._trigger_consigner_consignee_flow(data, trip_id, parcel_id)
                 
-                if consignor_response.success:
-                    logger.info("AgentManager: Consignor selection initiated")
+                if consigner_response.success:
+                    logger.info("AgentManager: Consigner/Consignee selection initiated")
                     
                     # Get the formatted message with partner options and button data
-                    formatted_partners = consignor_response.data.get("formatted_message", "")
-                    button_data = consignor_response.data.get("button_data", {})
+                    formatted_partners = consigner_response.data.get("message", "")
+                    button_data = consigner_response.data.get("button_data", {})
                     
-                    # Create comprehensive message with parcel success + consignor selection
-                    full_message = f"{response.data.get('message')}\n\n**NEXT STEP: Select a Consignor**\n\n{formatted_partners}"
+                    # Create comprehensive message with parcel success + consigner selection
+                    full_message = f"{response.data.get('message')}\n\n{formatted_partners}"
                     
                     return APIResponse(
                         success=True,
                         data={
                             "workflow": "CREATE_PARCEL_FOR_TRIP",
                             "parcel_result": response.data,
-                            "consignor_selection": consignor_response.data,
+                            "consigner_selection": consigner_response.data,
                             "message": full_message,
                             "button_data": button_data,
-                            "available_partners": consignor_response.data.get("available_partners", []),
-                            "current_page": consignor_response.data.get("current_page", 0),
+                            "available_partners": consigner_response.data.get("partners", []),
+                            "current_page": 0,
                             "requires_user_input": True,
-                            "input_type": "consignor_selection",
+                            "input_type": "consigner_selection",
                             "partner_buttons": button_data.get("buttons", []),
                             "action_buttons": button_data.get("action_buttons", [])
                         },
                         agent_name="AgentManager"
                     )
                 else:
-                    logger.warning(f"AgentManager: Consignor selection failed: {consignor_response.error}")
-                    # Still return success for parcel creation even if consignor selection fails
+                    logger.warning(f"AgentManager: Consigner selection failed: {consigner_response.error}")
+                    # Still return success for parcel creation even if consigner selection fails
                     return APIResponse(
                         success=True,
                         data={
                             "workflow": "CREATE_PARCEL_FOR_TRIP",
                             "parcel_result": response.data,
-                            "message": f"{response.data.get('message')} (Consignor selection unavailable)"
+                            "message": f"{response.data.get('message')} (Consigner selection unavailable)"
                         },
                         agent_name="AgentManager"
                     )
@@ -815,17 +819,17 @@ class AgentManager:
                 workflow_results["steps"].append("✓ Parcel created successfully")
                 workflow_results["parcel_result"] = parcel_response.data.get("parcel_result")
                 
-                # Step 3: Trigger consignor selection after successful parcel creation
+                # Step 3: Trigger NEW consigner/consignee selection after successful parcel creation
                 parcel_id = workflow_results["parcel_result"].get("parcel_id")
-                consignor_response = await self._trigger_consignor_selection(data, trip_id, parcel_id)
+                consigner_response = await self._trigger_consigner_consignee_flow(data, trip_id, parcel_id)
                 
-                if consignor_response.success:
-                    workflow_results["steps"].append("✓ Consignor selection initiated")
-                    workflow_results["consignor_selection"] = consignor_response.data
+                if consigner_response.success:
+                    workflow_results["steps"].append("✓ Consigner selection initiated")
+                    workflow_results["consigner_selection"] = consigner_response.data
                     
                     # Get the formatted message and button data
-                    formatted_partners = consignor_response.data.get("formatted_message", "")
-                    button_data = consignor_response.data.get("button_data", {})
+                    formatted_partners = consigner_response.data.get("message", "")
+                    button_data = consigner_response.data.get("button_data", {})
                     success_message = f"Successfully created trip ({trip_id}) and parcel ({parcel_id}).\n\n{formatted_partners}"
                     
                     return APIResponse(
@@ -835,21 +839,21 @@ class AgentManager:
                             "trip_id": trip_id,
                             "parcel_id": parcel_id,
                             "workflow_details": workflow_results,
-                            "consignor_selection": workflow_results.get("consignor_selection"),
+                            "consigner_selection": workflow_results.get("consigner_selection"),
                             "message": success_message,
                             "button_data": button_data,
-                            "available_partners": consignor_response.data.get("available_partners", []),
-                            "current_page": consignor_response.data.get("current_page", 0),
-                            "company_id": consignor_response.data.get("company_id"),
+                            "available_partners": consigner_response.data.get("partners", []),
+                            "current_page": 0,
+                            "company_id": data.get("current_company"),
                             "requires_user_input": True,
-                            "input_type": "consignor_selection",
+                            "input_type": "consigner_selection",
                             "partner_buttons": button_data.get("buttons", []),
                             "action_buttons": button_data.get("action_buttons", [])
                         },
                         agent_name="AgentManager"
                     )
                 else:
-                    workflow_results["steps"].append(f"⚠ Consignor selection failed: {consignor_response.error}")
+                    workflow_results["steps"].append(f"⚠ Consigner selection failed: {consigner_response.error}")
                     
                     return APIResponse(
                         success=True,
@@ -858,7 +862,7 @@ class AgentManager:
                             "trip_id": trip_id,
                             "parcel_id": parcel_id,
                             "workflow_details": workflow_results,
-                            "message": f"Successfully created trip ({trip_id}) and parcel ({parcel_id}). (Consignor selection unavailable)",
+                            "message": f"Successfully created trip ({trip_id}) and parcel ({parcel_id}). (Consigner selection unavailable)",
                             "requires_user_input": False
                         },
                         agent_name="AgentManager"
@@ -882,6 +886,63 @@ class AgentManager:
                 data=workflow_results
             )
     
+    async def _trigger_consigner_consignee_flow(self, data: Dict[str, Any], trip_id: str, parcel_id: str) -> APIResponse:
+        """
+        Trigger the NEW consigner/consignee selection flow (shows ONLY consigner first)
+        """
+        logger.info("AgentManager: Triggering NEW consigner/consignee selection flow")
+        
+        if "consigner_consignee" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="ConsignerConsigneeAgent not available",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            # Get company ID from user context
+            company_id = (
+                data.get("current_company") or 
+                data.get("company_id") or 
+                data.get("created_by_company") or
+                "62d66794e54f47829a886a1d"
+            )
+            
+            print(f"AgentManager: Starting consigner/consignee flow for company: {company_id}")
+            print(f"AgentManager: Trip ID: {trip_id}, Parcel ID: {parcel_id}")
+            
+            # Initialize the NEW consigner/consignee selection process
+            flow_data = {
+                "company_id": company_id,
+                "trip_id": trip_id,
+                "parcel_id": parcel_id,
+                "user_context": {
+                    "user_id": data.get("user_id"),
+                    "current_company": company_id,
+                    "username": data.get("username"),
+                    "name": data.get("name"),
+                    "email": data.get("email")
+                }
+            }
+            
+            # Start the flow - this will show ONLY consigner options
+            response = await self.start_consigner_consignee_flow(flow_data)
+            
+            if response.success:
+                logger.info("AgentManager: NEW consigner selection initiated (consigner only)")
+                return response
+            else:
+                logger.error(f"AgentManager: Failed to start consigner/consignee flow: {response.error}")
+                return response
+                
+        except Exception as e:
+            logger.error(f"AgentManager: Error triggering NEW consigner/consignee flow: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+
     async def _trigger_consignor_selection(self, data: Dict[str, Any], trip_id: str, parcel_id: str) -> APIResponse:
         """
         Trigger consignor selection after successful parcel creation
@@ -1269,6 +1330,281 @@ class AgentManager:
         
         return None
     
+    async def start_consigner_consignee_flow(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Start the enhanced consigner/consignee selection flow
+        """
+        logger.info("AgentManager: Starting consigner/consignee selection flow")
+        
+        if "consigner_consignee" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="ConsignerConsigneeAgent not available",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            consigner_consignee_agent = self.agents["consigner_consignee"]
+            
+            # Get company ID from user context
+            company_id = (
+                data.get("current_company") or 
+                data.get("company_id") or 
+                "62d66794e54f47829a886a1d"
+            )
+            
+            # Initialize the selection process
+            init_data = {
+                "company_id": company_id,
+                "trip_id": data.get("trip_id"),
+                "parcel_id": data.get("parcel_id"),
+                "user_context": {
+                    "user_id": data.get("user_id"),
+                    "current_company": company_id,
+                    "username": data.get("username"),
+                    "name": data.get("name"),
+                    "email": data.get("email")
+                }
+            }
+            
+            response = await consigner_consignee_agent.execute(APIIntent.CREATE, init_data)
+            
+            if response.success:
+                # The response already contains formatted message and button data from initialization
+                return APIResponse(
+                    success=True,
+                    data={
+                        "workflow": "CONSIGNER_CONSIGNEE_SELECTION",
+                        "message": response.data.get("message"),
+                        "button_data": response.data.get("button_data"),
+                        "partners": response.data.get("partners"),
+                        "current_step": response.data.get("current_step"),
+                        "selection_data": response.data.get("selection_data"),
+                        "requires_user_input": True,
+                        "input_type": "consigner_selection"
+                    },
+                    agent_name="AgentManager"
+                )
+            else:
+                return response
+                
+        except Exception as e:
+            logger.error(f"AgentManager: Error starting consigner/consignee flow: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+    
+    async def handle_consigner_consignee_selection(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Handle selection in the consigner/consignee flow
+        """
+        logger.info("AgentManager: Handling consigner/consignee selection")
+        
+        if "consigner_consignee" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="ConsignerConsigneeAgent not available",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            consigner_consignee_agent = self.agents["consigner_consignee"]
+            
+            # Handle the selection
+            response = await consigner_consignee_agent.execute(APIIntent.UPDATE, data)
+            
+            if response.success:
+                action = response.data.get("action")
+                
+                if action == "consigner_selected":
+                    # Consigner selected, response already contains formatted consignee selection message
+                    return APIResponse(
+                        success=True,
+                        data={
+                            "action": "consigner_selected",
+                            "message": response.data.get("message"),
+                            "button_data": response.data.get("button_data"),
+                            "partners": response.data.get("partners"),
+                            "current_step": response.data.get("current_step"),
+                            "selection_data": response.data.get("selection_data"),
+                            "selected_consigner": response.data.get("selected_consigner"),
+                            "requires_user_input": True,
+                            "input_type": "consignee_selection"
+                        },
+                        agent_name="AgentManager"
+                    )
+                
+                elif action == "consignee_selected":
+                    # Both selections complete - now update the parcel
+                    final_data = response.data.get("final_data")
+                    parcel_id = final_data.get("parcel_id")
+                    
+                    if parcel_id and "parcel_updater" in self.agents:
+                        # Automatically update the parcel with consigner/consignee details
+                        update_response = await self._update_parcel_with_selections(final_data, data)
+                        
+                        if update_response.success:
+                            return APIResponse(
+                                success=True,
+                                data={
+                                    "action": "selection_complete_and_parcel_updated",
+                                    "message": update_response.data.get("message"),
+                                    "final_data": final_data,
+                                    "update_result": update_response.data,
+                                    "parcel_id": parcel_id,
+                                    "selection_data": response.data.get("selection_data"),
+                                    "requires_user_input": False,
+                                    "workflow_complete": True
+                                },
+                                agent_name="AgentManager"
+                            )
+                        else:
+                            # Selection complete but parcel update failed
+                            return APIResponse(
+                                success=True,
+                                data={
+                                    "action": "selection_complete_update_failed",
+                                    "message": f"{response.data.get('message')}\n\n⚠️ **Warning:** Parcel update failed: {update_response.error}",
+                                    "final_data": final_data,
+                                    "api_payload": final_data.get("api_payload"),
+                                    "selection_data": response.data.get("selection_data"),
+                                    "update_error": update_response.error,
+                                    "requires_user_input": False,
+                                    "ready_for_manual_api": True
+                                },
+                                agent_name="AgentManager"
+                            )
+                    else:
+                        # No parcel ID or parcel updater not available
+                        return APIResponse(
+                            success=True,
+                            data={
+                                "action": "selection_complete",
+                                "message": response.data.get("message"),
+                                "final_data": final_data,
+                                "api_payload": final_data.get("api_payload"),
+                                "selection_data": response.data.get("selection_data"),
+                                "requires_user_input": False,
+                                "ready_for_api": True
+                            },
+                            agent_name="AgentManager"
+                        )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"AgentManager: Error handling consigner/consignee selection: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+    
+    async def _update_parcel_with_selections(self, final_data: Dict[str, Any], 
+                                           original_data: Dict[str, Any]) -> APIResponse:
+        """
+        Update parcel with consigner/consignee selections using PATCH API
+        """
+        logger.info("AgentManager: Updating parcel with consigner/consignee selections")
+        
+        try:
+            parcel_updater = self.agents["parcel_updater"]
+            parcel_id = final_data.get("parcel_id")
+            
+            if not parcel_id:
+                return APIResponse(
+                    success=False,
+                    error="No parcel_id found in final_data for update",
+                    agent_name="AgentManager"
+                )
+            
+            # Prepare data for parcel update
+            update_data = {
+                "parcel_id": parcel_id,
+                "final_data": final_data,
+                "trip_id": final_data.get("trip_id"),
+                "user_context": final_data.get("user_context", {})
+            }
+            
+            # Add any additional context from original data
+            if original_data:
+                for key in ["_etag", "company_id", "current_company"]:
+                    if key in original_data:
+                        update_data[key] = original_data[key]
+            
+            print(f"AgentManager: ========================================")
+            print(f"AgentManager: AUTOMATIC CHAIN EXECUTION")
+            print(f"AgentManager: ConsignerConsigneeAgent → ParcelUpdateAgent")
+            print(f"AgentManager: ========================================")
+            print(f"AgentManager: ConsignerConsigneeAgent completed successfully")
+            print(f"AgentManager: → Consigner selected: {final_data.get('consigner_details', {}).get('name')}")
+            print(f"AgentManager: → Consignee selected: {final_data.get('consignee_details', {}).get('name')}")
+            print(f"AgentManager: → Parcel ID: {parcel_id}")
+            print(f"AgentManager: → Trip ID: {final_data.get('trip_id')}")
+            print(f"AgentManager: Now executing ParcelUpdateAgent with PATCH API...")
+            
+            # Execute the parcel update via ParcelUpdateAgent
+            response = await parcel_updater.execute(APIIntent.CREATE, update_data)
+            
+            if response.success:
+                print(f"AgentManager: ✅ ParcelUpdateAgent execution SUCCESS!")
+                print(f"AgentManager: → PATCH API completed successfully")
+                print(f"AgentManager: → Parcel {parcel_id} updated with all consigner/consignee details")
+                print(f"AgentManager: ========================================")
+                logger.info(f"AgentManager: CHAIN COMPLETE: ConsignerConsigneeAgent → ParcelUpdateAgent → SUCCESS")
+                return response
+            else:
+                print(f"AgentManager: ❌ ParcelUpdateAgent execution FAILED!")
+                print(f"AgentManager: → Error: {response.error}")
+                print(f"AgentManager: ========================================")
+                logger.error(f"AgentManager: CHAIN FAILED: ConsignerConsigneeAgent → ParcelUpdateAgent → ERROR: {response.error}")
+                return response
+                
+        except Exception as e:
+            logger.error(f"AgentManager: Error updating parcel with selections: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+    
+    async def update_parcel_directly(self, data: Dict[str, Any]) -> APIResponse:
+        """
+        Direct method to update a parcel via PATCH API
+        """
+        logger.info("AgentManager: Direct parcel update requested")
+        
+        if "parcel_updater" not in self.agents:
+            return APIResponse(
+                success=False,
+                error="ParcelUpdateAgent not available",
+                agent_name="AgentManager"
+            )
+        
+        try:
+            parcel_updater = self.agents["parcel_updater"]
+            
+            # Determine the intent based on data structure
+            if "update_payload" in data:
+                # Direct update with payload
+                return await parcel_updater.execute(APIIntent.UPDATE, data)
+            elif "final_data" in data:
+                # Update with consigner/consignee data
+                return await parcel_updater.execute(APIIntent.CREATE, data)
+            else:
+                # Get parcel details
+                return await parcel_updater.execute(APIIntent.READ, data)
+                
+        except Exception as e:
+            logger.error(f"AgentManager: Error in direct parcel update: {str(e)}")
+            return APIResponse(
+                success=False,
+                error=str(e),
+                agent_name="AgentManager"
+            )
+
     async def handle_company_selection(self, data: Dict[str, Any]) -> APIResponse:
         """
         Handle user's company selection after partner selection
